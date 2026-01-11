@@ -5,9 +5,6 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 from app import MainWindow
 
-
-
-
 def main():
     try:
         app = QApplication(sys.argv)
@@ -21,7 +18,7 @@ def main():
             print("Warning: Stylesheet not found.")
             
         window = MainWindow()
-        window.show()
+        window.showMaximized()
         
         sys.exit(app.exec())
     except Exception as e:

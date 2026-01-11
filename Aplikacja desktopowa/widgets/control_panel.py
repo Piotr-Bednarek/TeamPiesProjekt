@@ -13,19 +13,20 @@ class SliderControl(QWidget):
         self.unit = unit
         self.factor = 1.0 / step if step < 1 else 1.0
         
-        layout = QVBoxLayout(self)
-        layout.setSpacing(4)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(10)
         
-        # Header
-        header = QHBoxLayout()
+        # Label
         self.lbl_name = QLabel(label)
         self.lbl_name.setStyleSheet("font-weight: bold; color: #94a3b8;")
-        self.lbl_val = QLabel(f"{init_val} {unit}")
-        self.lbl_val.setStyleSheet("color: #3b82f6; font-family: monospace; font-weight: bold;")
+        self.lbl_name.setFixedWidth(30) # Fixed width for alignment
         
-        header.addWidget(self.lbl_name)
-        header.addStretch()
-        header.addWidget(self.lbl_val)
+        # Value
+        self.lbl_val = QLabel(f"{init_val} {unit}")
+        self.lbl_val.setFixedWidth(50)
+        self.lbl_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_val.setStyleSheet("color: #3b82f6; font-family: monospace; font-weight: bold;")
         
         # Slider
         self.slider = QSlider(Qt.Horizontal)
@@ -36,8 +37,9 @@ class SliderControl(QWidget):
         self.slider.valueChanged.connect(self._on_change)
         self.slider.sliderReleased.connect(self._on_release)
         
-        layout.addLayout(header)
+        layout.addWidget(self.lbl_name)
         layout.addWidget(self.slider)
+        layout.addWidget(self.lbl_val)
         
         # Style container
         self.setObjectName("sliderContainer")
@@ -78,19 +80,15 @@ class ControlPanel(QWidget):
         super().__init__()
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
-        self.layout.setSpacing(15)
+        self.layout.setContentsMargins(5, 5, 5, 5)
+        self.layout.setSpacing(8)
         
         # Use QFrame for background style
         self.setObjectName("panel")
         self.setProperty("class", "card")
         
         # Title
-        title = QLabel("Panel Sterowania")
-        title.setProperty("class", "panel-title")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
-        self.layout.addWidget(title)
+
         
         # --- Source Selection ---
         source_frame = QFrame()
@@ -126,14 +124,10 @@ class ControlPanel(QWidget):
         cal_group = QFrame()
         cal_group.setStyleSheet("background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px;")
         cal_layout = QVBoxLayout(cal_group)
+        cal_layout.setContentsMargins(5, 5, 5, 5)
+        cal_layout.setSpacing(5)
         
-        cal_title = QLabel("KALIBRACJA 5-PUNKTOWA")
-        cal_title.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 11px;")
-        cal_layout.addWidget(cal_title)
-        
-        self.lbl_current_raw = QLabel("Aktualny RAW: ---")
-        self.lbl_current_raw.setStyleSheet("color: #64748b; font-size: 10px; margin-bottom: 5px;")
-        cal_layout.addWidget(self.lbl_current_raw)
+
         
         # 5 Buttons row
         btns_layout = QHBoxLayout()
@@ -178,6 +172,8 @@ class ControlPanel(QWidget):
         pid_group.setObjectName("pidGroup")
         pid_group.setStyleSheet("#pidGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
         pid_layout = QVBoxLayout(pid_group)
+        pid_layout.setContentsMargins(5, 5, 5, 5)
+        pid_layout.setSpacing(5)
         
         # PID Header + Mode Switch
         pid_header = QHBoxLayout()
@@ -209,9 +205,9 @@ class ControlPanel(QWidget):
         pid_layout.addLayout(pid_header)
         
         # Sliders
-        self.sli_kp = SliderControl("Kp (Proporcjonalny)", 0.0, 2.0, 0.01, 0.15)
-        self.sli_ki = SliderControl("Ki (Całkujący)", 0.0, 0.01, 0.0001, 0.0025)
-        self.sli_kd = SliderControl("Kd (Różniczkujący)", 0.0, 10.0, 0.1, 6.0)
+        self.sli_kp = SliderControl("Kp", 0.0, 2.0, 0.01, 0.15)
+        self.sli_ki = SliderControl("Ki", 0.0, 0.01, 0.0001, 0.0025)
+        self.sli_kd = SliderControl("Kd", 0.0, 10.0, 0.1, 6.0)
         
         # Connect commit signals individually
         self.sli_kp.value_committed.connect(self._on_kp_change)
@@ -289,4 +285,3 @@ class ControlPanel(QWidget):
         
         self.viz.set_data(data.get("filtered", 0), data.get("setpoint", 150))
         self.current_raw_distance = data.get("distance", 0)
-        self.lbl_current_raw.setText(f"Aktualny RAW: {self.current_raw_distance:.0f}")

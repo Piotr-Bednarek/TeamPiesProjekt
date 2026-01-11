@@ -7,7 +7,7 @@ class BeamVisualizer(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(100)
         self.distance = 0
         self.setpoint = 150
         self.min_val = 0
@@ -79,16 +79,7 @@ class BeamVisualizer(QWidget):
             pct = (mm - self.min_val) / (self.max_val - self.min_val)
             return self.margin + pct * (w - 2 * self.margin)
             
-        # --- Ruler Marks ---
-        marks = [0, 50, 100, 145, 200, 250, 290]
-        painter.setPen(QPen(QColor("#666666"), 1))
-        painter.setFont(QFont("Monospace", 8))
-        
-        for m in marks:
-            x_pos = mm_to_px(m)
-            painter.drawLine(int(x_pos), int(beam_y + 10), int(x_pos), int(beam_y + 15))
-            if m % 100 == 0 or m in [145, 290]:
-                painter.drawText(QRectF(x_pos - 20, beam_y + 18, 40, 15), Qt.AlignCenter, str(m))
+
                 
         # --- Ball ---
         ball_radius = 15

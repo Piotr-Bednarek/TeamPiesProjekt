@@ -69,8 +69,8 @@ class MainWindow(QMainWindow):
         
         splitter.addWidget(left_widget)
         splitter.addWidget(self.charts_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2) # Right side bigger
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3) # Right side bigger but less dominant
         
         self.main_layout.addWidget(splitter, stretch=1)
         

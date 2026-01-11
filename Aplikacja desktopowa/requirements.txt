@@ -1,1 +1,4 @@
 pyserial
+PySide6
+pyqtgraph
+numpy
