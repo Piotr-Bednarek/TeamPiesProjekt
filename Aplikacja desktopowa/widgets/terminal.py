@@ -10,27 +10,6 @@ class Terminal(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Header
-        header_frame = QWidget()
-        header_frame.setObjectName("termHeader")
-        header_frame.setStyleSheet("""
-            QWidget#termHeader {
-                background-color: #1a1f2e;
-                border-bottom: 1px solid #334155;
-            }
-            QLabel {
-                padding: 5px;
-            }
-        """)
-        h_layout = QHBoxLayout(header_frame)
-        h_layout.setContentsMargins(5, 5, 5, 5)
-        
-        title = QLabel("LOGI KOMUNIKACJI")
-        title.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px;")
-        h_layout.addWidget(title)
-        
-        layout.addWidget(header_frame)
-        
         # Splitter for TX/RX
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)

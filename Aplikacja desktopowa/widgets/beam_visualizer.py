@@ -7,7 +7,8 @@ class BeamVisualizer(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(100)
+        self.setMinimumHeight(70)
+        self.setMaximumHeight(90)
         self.distance = 0
         self.setpoint = 150
         self.min_val = 0

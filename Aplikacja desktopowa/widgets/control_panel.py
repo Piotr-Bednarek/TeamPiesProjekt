@@ -1,5 +1,7 @@
+import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QSlider, QHBoxLayout, 
-                               QPushButton, QButtonGroup, QGridLayout, QFrame, QRadioButton)
+                               QPushButton, QButtonGroup, QGridLayout, QFrame, QRadioButton,
+                               QComboBox, QLineEdit, QMessageBox, QInputDialog)
 from PySide6.QtCore import Qt, Signal, QTimer
 from widgets.beam_visualizer import BeamVisualizer
 
@@ -92,9 +94,9 @@ class ControlPanel(QWidget):
         
         # --- Source Selection ---
         source_frame = QFrame()
-        source_frame.setStyleSheet("background-color: rgba(255,255,255,0.05); border-radius: 6px; padding: 4px;")
+        source_frame.setStyleSheet("background-color: rgba(255,255,255,0.05); border-radius: 4px; padding: 2px;")
         source_layout = QHBoxLayout(source_frame)
-        source_layout.setContentsMargins(10, 5, 10, 5)
+        source_layout.setContentsMargins(5, 2, 5, 2)
         
         lbl_source = QLabel("Źródło:")
         lbl_source.setStyleSheet("font-weight: bold; color: #ccc;")
@@ -219,6 +221,57 @@ class ControlPanel(QWidget):
         pid_layout.addWidget(self.sli_kd)
         
         self.layout.addWidget(pid_group)
+        
+        # --- PID Presets Section ---
+        self.presets_file = os.path.join(os.path.dirname(__file__), "..", "pid_presets.txt")
+        self.presets = {}  # name -> (kp, ki, kd)
+        self._load_presets()
+        
+        presets_group = QFrame()
+        presets_group.setObjectName("presetsGroup")
+        presets_group.setStyleSheet("#presetsGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
+        presets_layout = QVBoxLayout(presets_group)
+        presets_layout.setContentsMargins(5, 5, 5, 5)
+        presets_layout.setSpacing(5)
+        
+        # Header
+        presets_label = QLabel("ZESTAWY PID")
+        presets_label.setStyleSheet("color: #10b981; font-weight: bold; font-size: 11px;")
+        presets_layout.addWidget(presets_label)
+        
+        # Dropdown row
+        dropdown_row = QHBoxLayout()
+        self.presets_combo = QComboBox()
+        self.presets_combo.setMinimumWidth(120)
+        self.presets_combo.addItem("-- Wybierz --")
+        for name in self.presets.keys():
+            self.presets_combo.addItem(name)
+        self.presets_combo.currentTextChanged.connect(self._on_preset_selected)
+        
+        self.btn_apply_preset = QPushButton("Zastosuj")
+        self.btn_apply_preset.setStyleSheet("background-color: #3b82f6;")
+        self.btn_apply_preset.clicked.connect(self._apply_preset)
+        
+        dropdown_row.addWidget(self.presets_combo, 1)
+        dropdown_row.addWidget(self.btn_apply_preset)
+        presets_layout.addLayout(dropdown_row)
+        
+        # Save/Delete row
+        action_row = QHBoxLayout()
+        self.btn_save_preset = QPushButton("Zapisz obecne")
+        self.btn_save_preset.setStyleSheet("background-color: #22c55e;")
+        self.btn_save_preset.clicked.connect(self._save_preset)
+        
+        self.btn_delete_preset = QPushButton("Usuń")
+        self.btn_delete_preset.setStyleSheet("background-color: #ef4444;")
+        self.btn_delete_preset.clicked.connect(self._delete_preset)
+        
+        action_row.addWidget(self.btn_save_preset, 1)
+        action_row.addWidget(self.btn_delete_preset)
+        presets_layout.addLayout(action_row)
+        
+        self.layout.addWidget(presets_group)
+        
         self.layout.addStretch()
         
         # Internal state
@@ -235,6 +288,117 @@ class ControlPanel(QWidget):
 
     def _on_kd_change(self, val):
         self.kd_update.emit(val)
+    
+    # --- Preset Management Methods ---
+    def _load_presets(self):
+        """Wczytaj zestawy PID z pliku txt"""
+        self.presets = {}
+        if os.path.exists(self.presets_file):
+            try:
+                with open(self.presets_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split(";")
+                        if len(parts) == 4:
+                            name, kp, ki, kd = parts
+                            self.presets[name] = (float(kp), float(ki), float(kd))
+            except Exception as e:
+                print(f"Błąd wczytywania presetów: {e}")
+    
+    def _save_presets_to_file(self):
+        """Zapisz wszystkie zestawy do pliku txt"""
+        try:
+            with open(self.presets_file, "w", encoding="utf-8") as f:
+                f.write("# Zestawy PID: nazwa;Kp;Ki;Kd\n")
+                for name, (kp, ki, kd) in self.presets.items():
+                    f.write(f"{name};{kp};{ki};{kd}\n")
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", f"Nie można zapisać pliku: {e}")
+    
+    def _on_preset_selected(self, name):
+        """Obsługa wyboru presetu z dropdowna"""
+        pass  # Nic nie robimy przy samym wyborze, użytkownik musi kliknąć "Zastosuj"
+    
+    def _apply_preset(self):
+        """Zastosuj wybrany preset"""
+        name = self.presets_combo.currentText()
+        if name == "-- Wybierz --" or name not in self.presets:
+            return
+        
+        kp, ki, kd = self.presets[name]
+        
+        # Ustaw suwaki
+        self.sli_kp.set_value(kp)
+        self.sli_ki.set_value(ki)
+        self.sli_kd.set_value(kd)
+        
+        # Wyemituj sygnały do wysłania do urządzenia z opóźnieniem 500ms
+        self.btn_apply_preset.setEnabled(False)
+        self.btn_apply_preset.setText("Wysyłanie...")
+        
+        self.kp_update.emit(kp)
+        QTimer.singleShot(500, lambda: self.ki_update.emit(ki))
+        QTimer.singleShot(1000, lambda: self.kd_update.emit(kd))
+        QTimer.singleShot(1500, lambda: self._finish_apply_preset())
+    
+    def _finish_apply_preset(self):
+        """Przywróć przycisk po wysłaniu wszystkich wartości"""
+        self.btn_apply_preset.setEnabled(True)
+        self.btn_apply_preset.setText("Zastosuj")
+    
+    def _save_preset(self):
+        """Zapisz obecne wartości jako nowy preset"""
+        name, ok = QInputDialog.getText(self, "Zapisz zestaw PID", "Podaj nazwę dla zestawu:")
+        if not ok or not name.strip():
+            return
+        
+        name = name.strip()
+        
+        # Pobierz aktualne wartości z suwaków
+        kp = self.sli_kp.slider.value() / self.sli_kp.factor
+        ki = self.sli_ki.slider.value() / self.sli_ki.factor
+        kd = self.sli_kd.slider.value() / self.sli_kd.factor
+        
+        # Sprawdź czy nadpisujemy
+        if name in self.presets:
+            reply = QMessageBox.question(self, "Potwierdź", 
+                f"Zestaw '{name}' już istnieje. Nadpisać?",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+        else:
+            # Dodaj do comboboxa
+            self.presets_combo.addItem(name)
+        
+        self.presets[name] = (kp, ki, kd)
+        self._save_presets_to_file()
+        
+        # Ustaw wybrany preset
+        self.presets_combo.setCurrentText(name)
+    
+    def _delete_preset(self):
+        """Usuń wybrany preset"""
+        name = self.presets_combo.currentText()
+        if name == "-- Wybierz --" or name not in self.presets:
+            QMessageBox.warning(self, "Uwaga", "Wybierz zestaw do usunięcia.")
+            return
+        
+        reply = QMessageBox.question(self, "Potwierdź", 
+            f"Czy na pewno usunąć zestaw '{name}'?",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        
+        del self.presets[name]
+        self._save_presets_to_file()
+        
+        # Usuń z comboboxa
+        idx = self.presets_combo.findText(name)
+        if idx >= 0:
+            self.presets_combo.removeItem(idx)
+        self.presets_combo.setCurrentIndex(0)
         
     def _on_cal_click(self, idx):
         # Toggle check state logic manually or trust QButtonGroup? No group here.
