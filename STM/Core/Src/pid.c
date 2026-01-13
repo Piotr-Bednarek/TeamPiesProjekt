@@ -70,15 +70,17 @@ float PID_Compute(PID_Controller_t *pid, float setpoint, float measured) {
     // Redukuje to szum różniczkowania (drgania serwa) i "Derivative Kick"
     float filtered_error = EMA_Update(&pid->error_filter, error);
     
-    // CMSIS PID oblicza wyjście na podstawie przefiltrowanego błędu
-    float32_t out = arm_pid_f32(&pid->instance, filtered_error);
+    // CMSIS PID oblicza wyjście na podstawie przefiltrowanego błędu (P+I, bez D w trybie DerivOnMeas)
+    float32_t out_pi = arm_pid_f32(&pid->instance, filtered_error);
+    float32_t out = out_pi;
 
     // Jeśli tryb Derivative on Measurement, dodaj ręcznie człon różniczkujący
     // Wzór: D = -Kd * (pomiar - poprz_pomiar)
+    float d_term = 0.0f;
     if (pid->mode == PID_MODE_DERIV_ON_MEASUREMENT) {
         // Uwaga: CMSIS PID w tym trybie ma wewn. Kd = 0, więc nie liczy D z błędu.
         // Dodajemy D liczone ze zmiany pomiaru.
-        float d_term = -pid->Kd_user * (measured - pid->prev_meas);
+        d_term = -pid->Kd_user * (measured - pid->prev_meas);
         out += d_term;
     }
     pid->prev_meas = measured;
@@ -91,13 +93,17 @@ float PID_Compute(PID_Controller_t *pid, float setpoint, float measured) {
     
     if (out > max_offset) {
         out = max_offset;
-        // ANTI-WINDUP: Zaktualizuj stan wewnętrzny (akumulator wyjścia) nasyconą wartością
-        // state[2] w CMSIS DSP PID przechowuje y[n-1] dla następnego kroku
-        pid->instance.state[2] = out;
+        // ANTI-WINDUP: Zapisz tylko P+I (bez D!) do state[2]
+        // D nie powinno być akumulowane w velocity-form PID
+        float32_t pi_saturated = max_offset - d_term;
+        if (pi_saturated > max_offset) pi_saturated = max_offset;
+        pid->instance.state[2] = pi_saturated;
     } else if (out < min_offset) {
         out = min_offset;
-        // ANTI-WINDUP
-        pid->instance.state[2] = out;
+        // ANTI-WINDUP: Zapisz tylko P+I (bez D!)
+        float32_t pi_saturated = min_offset - d_term;
+        if (pi_saturated < min_offset) pi_saturated = min_offset;
+        pid->instance.state[2] = pi_saturated;
     }
     
     // Dodaj centrum aby uzyskać finalny kąt serwa

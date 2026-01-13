@@ -52,8 +52,8 @@
 
 // Zakres ruchu serwa
 #define SERVO_CENTER       100.0f
-#define SERVO_MIN_LIMIT    50.0f
-#define SERVO_MAX_LIMIT    150.0f
+#define SERVO_MIN_LIMIT    60.0f
+#define SERVO_MAX_LIMIT    140.0f
 
 // Ustawienia sprzętowe Serwa (PWM)
 #define SERVO_MIN_CCR      500
@@ -69,7 +69,7 @@
 #define D_FILTER_ALPHA     0.25f  // Wygładzanie dla członu D (0.0 - 1.0)
 
 // Wygładzanie Serwa
-#define SERVO_ANGLE_DEADBAND  0.0f // Strefa nieczułości serwa (0.8 stopnia) - ignoruje małe drgania
+#define SERVO_ANGLE_DEADBAND  0.8f // Strefa nieczułości serwa (0.8 stopnia) - ignoruje małe drgania
 #define SERVO_SMOOTHING_SIZE  1    // Ilość próbek do wygładzania ruchu
 
 #define AVG_ERR_SAMPLES       35   // Liczba próbek do średniego uchybu (ok. 1 sekunda)
@@ -794,7 +794,7 @@ void StartControlTask(void const * argument)
 
 	// Lekki filtr EMA dla czujnika (Alpha mniejsze = mocniejsze filtrowanie)
 	EMA_Filter_t dist_ema;
-	EMA_Init(&dist_ema, 0.3f);
+	EMA_Init(&dist_ema, 0.5f);
 
 	// Start ADC nie jest potrzebny tutaj w trybie Single, będziemy startować w pętli
 	// HAL_ADC_Start(&hadc1);
