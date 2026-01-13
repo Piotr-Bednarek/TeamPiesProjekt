@@ -934,24 +934,17 @@ void StartControlTask(void const * argument)
 		// Filtracja Medianowa (usuwanie szpilek z surowego odczytu)
 		float dist_median = MedianFilter_Apply(&median_filter, (float) distance);
 
-		// Filtracja Skoków (Spike Filter)
+		// Filtracja Skoków (Spike Filter) - całkowicie odrzuca skoki > 25mm
 		if (loop_counter > 10) { // Allow startup
 			float jump = dist_median - prev_valid_dist;
 			if (jump < 0)
 				jump = -jump;
 
 			if (jump > 25.0f) {
-				if (invalid_count < 5) {
-					dist_median = prev_valid_dist; // Ignore this sample, use previous
-					invalid_count++;
-				} else {
-					// Persisted long enough, accept it
-					invalid_count = 0;
-					prev_valid_dist = dist_median;
-				}
+				// Całkowite odrzucenie szpilki - użyj poprzedniej wartości
+				dist_median = prev_valid_dist;
 			} else {
 				prev_valid_dist = dist_median;
-				invalid_count = 0;
 			}
 		} else {
 			prev_valid_dist = dist_median;
