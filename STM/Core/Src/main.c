@@ -125,11 +125,10 @@ volatile uint8_t rx_idx = 0;
 volatile uint8_t cmd_received = 0;
 
 // Główne zmienne sterujące
-// Pozycja piłki: 0 mm (start) - 290 mm (koniec)
-volatile float g_setpoint = 145.0f; // Domyślnie środek belki
-volatile float g_Kp = 0.15f;       // Wzmocnienie proporcjonalne (dodatnie po obrocie serwa)
-volatile float g_Ki = 0.0025f;     // Wzmocnienie całkujące (dodatnie po obrocie serwa)
-volatile float g_Kd = 6.0f;        // Wzmocnienie różniczkujące (dodatnie po obrocie serwa)
+volatile float g_setpoint = 125.0f; // Domyślnie środek belki
+volatile float g_Kp = 0.44f;       // Wzmocnienie proporcjonalne (dodatnie po obrocie serwa)
+volatile float g_Ki = 0.0053f;     // Wzmocnienie całkujące (dodatnie po obrocie serwa)
+volatile float g_Kd = 5.0f;        // Wzmocnienie różniczkujące (dodatnie po obrocie serwa)
 
 // Zmienne kalibracji
 volatile uint8_t calibration_mode = 0;

@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
     def _create_connection_tile(self):
         tile = QWidget()
         tile.setProperty("class", "card") 
-        tile.setFixedWidth(320) # Wider to fit controls in one row
+        tile.setFixedWidth(260) # Compact width
         
         layout = QVBoxLayout(tile)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -178,23 +178,23 @@ class MainWindow(QMainWindow):
     def _create_recording_tile(self):
         tile = QWidget()
         tile.setProperty("class", "card") 
-        tile.setFixedWidth(280)
+        tile.setFixedWidth(160)  # Compact width
         
         layout = QVBoxLayout(tile)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
         
-        # Status Label
-        self.lbl_rec_status = QLabel("NAGRYWANIE: ZATRZYMANE")
-        self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+        # Status Label (shorter text)
+        self.lbl_rec_status = QLabel("REC: STOP")
+        self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;")
         layout.addWidget(self.lbl_rec_status)
         
         # Controls Row
         row_controls = QHBoxLayout()
-        row_controls.setSpacing(5)
+        row_controls.setSpacing(4)
         
-        self.btn_rec_toggle = QPushButton("▶ Start")
-        self.btn_rec_toggle.setFixedHeight(28)
+        self.btn_rec_toggle = QPushButton("▶")
+        self.btn_rec_toggle.setFixedSize(32, 26)
         self.btn_rec_toggle.setStyleSheet("""
             QPushButton { 
                 background-color: #22c55e; 
@@ -202,15 +202,13 @@ class MainWindow(QMainWindow):
                 border: none; 
                 border-radius: 4px;
                 font-weight: bold;
-                padding: 0 15px;
             }
             QPushButton:hover { background-color: #16a34a; }
-            QPushButton:disabled { background-color: #555; }
         """)
         self.btn_rec_toggle.clicked.connect(self._toggle_recording)
         
-        self.lbl_rec_samples = QLabel("Próbki: 0")
-        self.lbl_rec_samples.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_rec_samples = QLabel("0")
+        self.lbl_rec_samples.setStyleSheet("color: #94a3b8; font-size: 10px;")
         
         row_controls.addWidget(self.btn_rec_toggle)
         row_controls.addWidget(self.lbl_rec_samples)
@@ -227,7 +225,7 @@ class MainWindow(QMainWindow):
             self.recording_data = []
             self.recording_start_time = time.time()
             
-            self.btn_rec_toggle.setText("⏹ Stop")
+            self.btn_rec_toggle.setText("⏹")
             self.btn_rec_toggle.setStyleSheet("""
                 QPushButton { 
                     background-color: #ef4444; 
@@ -235,18 +233,17 @@ class MainWindow(QMainWindow):
                     border: none; 
                     border-radius: 4px;
                     font-weight: bold;
-                    padding: 0 15px;
                 }
                 QPushButton:hover { background-color: #dc2626; }
             """)
-            self.lbl_rec_status.setText("NAGRYWANIE: AKTYWNE")
-            self.lbl_rec_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 11px; text-transform: uppercase;")
-            self.lbl_rec_samples.setText("Próbki: 0")
+            self.lbl_rec_status.setText("REC: ●")
+            self.lbl_rec_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 10px;")
+            self.lbl_rec_samples.setText("0")
         else:
             # Stop recording and save
             self.is_recording = False
             
-            self.btn_rec_toggle.setText("▶ Start")
+            self.btn_rec_toggle.setText("▶")
             self.btn_rec_toggle.setStyleSheet("""
                 QPushButton { 
                     background-color: #22c55e; 
@@ -254,12 +251,11 @@ class MainWindow(QMainWindow):
                     border: none; 
                     border-radius: 4px;
                     font-weight: bold;
-                    padding: 0 15px;
                 }
                 QPushButton:hover { background-color: #16a34a; }
             """)
-            self.lbl_rec_status.setText("NAGRYWANIE: ZATRZYMANE")
-            self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+            self.lbl_rec_status.setText("REC: STOP")
+            self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;")
             
             # Save to CSV
             if self.recording_data:
@@ -373,7 +369,7 @@ class MainWindow(QMainWindow):
             self.recording_data.append(record)
             
             # Update sample count in UI
-            self.lbl_rec_samples.setText(f"Próbki: {len(self.recording_data)}")
+            self.lbl_rec_samples.setText(str(len(self.recording_data)))
             
         # Update Control Panel immediate values
         self.control_panel.update_data(data)
