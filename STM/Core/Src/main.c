@@ -27,6 +27,7 @@
 #include "VL53L0X.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "filters.h"
 #include "calibration.h"
 
@@ -930,7 +931,7 @@ void StartControlTask(void const * argument)
 
 	// Lekki filtr EMA dla czujnika (Alpha mniejsze = mocniejsze filtrowanie)
 	EMA_Filter_t dist_ema;
-	EMA_Init(&dist_ema, 0.5f);
+	EMA_Init(&dist_ema, 0.3f);
 
 	// Start ADC nie jest potrzebny tutaj w trybie Single, będziemy startować w pętli
 	// HAL_ADC_Start(&hadc1);
@@ -956,8 +957,8 @@ void StartControlTask(void const * argument)
 				g_setpoint = atof((char*) &rx_buffer[2]); // S:Setpoint
 				if (g_setpoint < 0.0f)
 					g_setpoint = 0.0f;
-				if (g_setpoint > 290.0f)
-					g_setpoint = 290.0f;
+				if (g_setpoint > 250.0f)
+					g_setpoint = 250.0f;
 			} else if (rx_buffer[0] == 'P' && rx_buffer[1] == ':')
 				g_Kp = atof((char*) &rx_buffer[2]);
 			else if (rx_buffer[0] == 'I' && rx_buffer[1] == ':')
@@ -996,9 +997,13 @@ void StartControlTask(void const * argument)
 					}
 				}
 			} else if (rx_buffer[0] == 'M' && rx_buffer[1] == ':') {
-				// M:0 -> GUI, M:1 -> Potencjometr
+				// M:0 -> GUI, M:1 -> Potencjometr, M:2 -> Sinus
 				control_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				HAL_UART_Transmit(&huart3, (uint8_t*) (control_mode ? "MODE: ANALOG\r\n" : "MODE: GUI\r\n"), 14, 100);
+				const char* mode_names[] = {"GUI", "ANALOG", "SINUS"};
+				if (control_mode <= 2) {
+					sprintf(msg, "MODE: %s\r\n", mode_names[control_mode]);
+					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+				}
 			}
 
 			cmd_received = 0;
@@ -1028,6 +1033,17 @@ void StartControlTask(void const * argument)
 		}
 		// HAL_ADC_Stop nie jest konieczne w Single Mode (sam się zatrzymuje po EOC), ale dobre dla porządku
 		HAL_ADC_Stop(&hadc1);
+		
+		// Tryb Sinus - generowanie sinusoidalnego setpointu
+		if (control_mode == 2) {
+			// Parametry sinusa: okres 5s, amplituda 50mm, centrum 125mm
+			float t = (float)HAL_GetTick() / 1000.0f; // czas w sekundach
+			float period = 5.0f;      // okres w sekundach
+			float amplitude = 50.0f;   // amplituda w mm
+			float center = 125.0f;     // środek w mm
+			
+			g_setpoint = center + amplitude * sinf(2.0f * 3.14159f * t / period);
+		}
 
 		if (distance >= 8190) {
 			// 8190/8191 = Hardware error / Out of range

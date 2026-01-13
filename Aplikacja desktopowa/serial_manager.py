@@ -207,7 +207,7 @@ class SerialManager(QObject):
                 if seg.startswith("D:"):
                     try:
                         val = float(seg[2:])
-                        current_data["distance"] = max(0, min(val, 290))
+                        current_data["distance"] = max(0, val)
                     except: pass
                 elif seg.startswith("F:"):
                     try: val = float(seg[2:]); current_data["filtered"] = val

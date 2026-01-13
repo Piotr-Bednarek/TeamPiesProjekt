@@ -12,7 +12,7 @@ class BeamVisualizer(QWidget):
         self.distance = 0
         self.setpoint = 150
         self.min_val = 0
-        self.max_val = 290
+        self.max_val = 250
         self.margin = 25  # Space on left and right
         
         self.is_dragging = False

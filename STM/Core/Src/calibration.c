@@ -16,10 +16,10 @@
 
 static CalPoint_t cal_table[5] = {
 	{ 50.0f,   0.0f },
-	{ 90.0f,   75.0f },
-	{ 175.0f,  150.0f },
-	{ 270.0f,  225.0f },
-	{ 310.0f,  290.0f }
+	{ 100.0f,  62.5f },
+	{ 150.0f,  125.0f },
+	{ 200.0f,  187.5f },
+	{ 250.0f,  250.0f }
 };
 
 static volatile uint8_t calibration_ready = 0;

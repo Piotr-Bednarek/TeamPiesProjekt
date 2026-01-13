@@ -44,7 +44,7 @@ class ChartsPanel(QWidget):
         # --- Chart 1: Distance & Setpoint (Main) ---
         self.plot_main = pg.PlotWidget()
         self.plot_main.showGrid(x=False, y=True, alpha=0.3)
-        self.plot_main.setYRange(0, 300, padding=0)
+        self.plot_main.setYRange(0, 260, padding=0)
         self.plot_main.setMouseEnabled(x=False, y=False)
         
         # Curves

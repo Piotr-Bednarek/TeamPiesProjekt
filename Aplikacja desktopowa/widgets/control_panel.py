@@ -104,16 +104,19 @@ class ControlPanel(QWidget):
         self.rb_gui = QRadioButton("GUI (Suwak)")
         self.rb_gui.setChecked(True)
         self.rb_analog = QRadioButton("Potencjometr")
+        self.rb_sinus = QRadioButton("Sinus")
         
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.rb_gui, 0)
         self.mode_group.addButton(self.rb_analog, 1)
+        self.mode_group.addButton(self.rb_sinus, 2)
         self.mode_group.idClicked.connect(self.mode_update.emit)
         
         source_layout.addWidget(lbl_source)
         source_layout.addStretch()
         source_layout.addWidget(self.rb_gui)
         source_layout.addWidget(self.rb_analog)
+        source_layout.addWidget(self.rb_sinus)
         
         self.layout.addWidget(source_frame)
         
@@ -134,7 +137,7 @@ class ControlPanel(QWidget):
         # 5 Buttons row
         btns_layout = QHBoxLayout()
         self.cal_points = [None] * 5
-        self.cal_targets = [0, 75, 150, 225, 290]
+        self.cal_targets = [0, 62.5, 125, 187.5, 250]
         self.cal_btns = []
         labels = ["Start", "25%", "Środek", "75%", "Koniec"]
         colors = ["#ff4444", "#ff8800", "#ffcc00", "#88ff00", "#00ff00"]
@@ -440,7 +443,7 @@ class ControlPanel(QWidget):
             QTimer.singleShot(2000, lambda: self.btn_save_cal.setText("Zapisz kalibrację (Gotowe)"))
 
     def update_data(self, data):
-        self.viz.set_data(data.get("distance", 0), data.get("setpoint", 150))
+        self.viz.set_data(data.get("distance", 0), data.get("setpoint", 125))
         self.current_raw_distance = data.get("distance", 0) # Use raw distance for calibration?
         # Note: React app uses `rawDistance` prop for calibration, which comes from `latestData.distance`.
         # React app `distance` prop is filtered? No, `ControlPanel` gets `distance={latestData.filtered}` and `rawDistance={latestData.distance}`.

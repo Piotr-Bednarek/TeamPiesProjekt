@@ -1,2 +1,4 @@
 # Zestawy PID: nazwa;Kp;Ki;Kd
 optymalne;0.15;0.0025;6.0
+Przypadkowo;0.42;0.0064;6.9
+Ziegler-Nichols;0.17;0.0035;1.9

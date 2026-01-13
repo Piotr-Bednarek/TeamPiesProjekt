@@ -32,8 +32,8 @@ def calculate_metrics(history):
          avg_error = sum(errors) / len(errors) if errors else 0.0
          
     # avg_error_percent = (avg_error / avg_setpoint * 100) if avg_setpoint > 0 else 0
-    # User requested % of full range (290mm)
-    avg_error_percent = (avg_error / 290.0) * 100.0
+    # User requested % of full range (250mm)
+    avg_error_percent = (avg_error / 250.0) * 100.0
     
     # Calculate StdDev
     # std = sqrt(mean(abs(x - x.mean())**2))

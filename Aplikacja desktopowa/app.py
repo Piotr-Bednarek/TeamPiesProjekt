@@ -1,5 +1,9 @@
 import sys
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter
+import time
+import csv
+import os
+from datetime import datetime
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 
@@ -21,6 +25,11 @@ class MainWindow(QMainWindow):
         self.serial = SerialManager()
         self.data_history = []
         
+        # --- Recording State ---
+        self.is_recording = False
+        self.recording_data = []
+        self.recording_start_time = 0
+        
         # --- UI Setup ---
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -41,7 +50,11 @@ class MainWindow(QMainWindow):
         self.conn_tile = self._create_connection_tile()
         self.top_row_layout.addWidget(self.conn_tile)
         
-        # 1.2 Metrics Panel (modified to be added to layout)
+        # 1.2 Recording Tile
+        self.rec_tile = self._create_recording_tile()
+        self.top_row_layout.addWidget(self.rec_tile)
+        
+        # 1.3 Metrics Panel (modified to be added to layout)
         self.metrics_panel = MetricsPanel()
         self.top_row_layout.addWidget(self.metrics_panel)
         # Assuming MetricsPanel expects to expand? It's a HBox of cards.
@@ -151,6 +164,121 @@ class MainWindow(QMainWindow):
         
         return tile
 
+    def _create_recording_tile(self):
+        tile = QWidget()
+        tile.setProperty("class", "card") 
+        tile.setFixedWidth(280)
+        
+        layout = QVBoxLayout(tile)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+        
+        # Status Label
+        self.lbl_rec_status = QLabel("NAGRYWANIE: ZATRZYMANE")
+        self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+        layout.addWidget(self.lbl_rec_status)
+        
+        # Controls Row
+        row_controls = QHBoxLayout()
+        row_controls.setSpacing(5)
+        
+        self.btn_rec_toggle = QPushButton("▶ Start")
+        self.btn_rec_toggle.setFixedHeight(28)
+        self.btn_rec_toggle.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                padding: 0 15px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:disabled { background-color: #555; }
+        """)
+        self.btn_rec_toggle.clicked.connect(self._toggle_recording)
+        
+        self.lbl_rec_samples = QLabel("Próbki: 0")
+        self.lbl_rec_samples.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        
+        row_controls.addWidget(self.btn_rec_toggle)
+        row_controls.addWidget(self.lbl_rec_samples)
+        row_controls.addStretch()
+        
+        layout.addLayout(row_controls)
+        
+        return tile
+    
+    def _toggle_recording(self):
+        if not self.is_recording:
+            # Start recording
+            self.is_recording = True
+            self.recording_data = []
+            self.recording_start_time = time.time()
+            
+            self.btn_rec_toggle.setText("⏹ Stop")
+            self.btn_rec_toggle.setStyleSheet("""
+                QPushButton { 
+                    background-color: #ef4444; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 4px;
+                    font-weight: bold;
+                    padding: 0 15px;
+                }
+                QPushButton:hover { background-color: #dc2626; }
+            """)
+            self.lbl_rec_status.setText("NAGRYWANIE: AKTYWNE")
+            self.lbl_rec_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+            self.lbl_rec_samples.setText("Próbki: 0")
+        else:
+            # Stop recording and save
+            self.is_recording = False
+            
+            self.btn_rec_toggle.setText("▶ Start")
+            self.btn_rec_toggle.setStyleSheet("""
+                QPushButton { 
+                    background-color: #22c55e; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 4px;
+                    font-weight: bold;
+                    padding: 0 15px;
+                }
+                QPushButton:hover { background-color: #16a34a; }
+            """)
+            self.lbl_rec_status.setText("NAGRYWANIE: ZATRZYMANE")
+            self.lbl_rec_status.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+            
+            # Save to CSV
+            if self.recording_data:
+                self._save_recording()
+    
+    def _save_recording(self):
+        # Generate default filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"nagranie_{timestamp}.csv"
+        
+        # Open file dialog
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Zapisz nagranie",
+            default_filename,
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if filepath:
+            try:
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    fieldnames = ['time', 'distance', 'filtered', 'setpoint', 'error', 'control']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(self.recording_data)
+                    
+                self.terminal.append_rx(f"Zapisano {len(self.recording_data)} próbek do: {filepath}", "success")
+            except Exception as e:
+                self.terminal.append_rx(f"Błąd zapisu: {e}", "error")
+
     def _update_ports(self, ports):
         current = self.combo_ports.currentText()
         self.combo_ports.clear()
@@ -213,11 +341,28 @@ class MainWindow(QMainWindow):
         # Note: serial_manager emits existing dict reference but updated values, 
         # so we should copy it for history to avoid mutations affecting old history
         snapshot = data.copy()
-        snapshot['timestamp'] = 0 # Todo: add timestamp
+        current_time = time.time()
+        snapshot['timestamp'] = current_time
         
         self.data_history.append(snapshot)
         if len(self.data_history) > 1000: # Keep more history in desktop
             self.data_history.pop(0)
+        
+        # Recording logic - collect data with relative timestamp
+        if self.is_recording:
+            relative_time = current_time - self.recording_start_time
+            record = {
+                'time': round(relative_time, 4),
+                'distance': data.get('distance', 0),
+                'filtered': data.get('filtered', 0),
+                'setpoint': data.get('setpoint', 0),
+                'error': data.get('error', 0),
+                'control': data.get('control', 0)
+            }
+            self.recording_data.append(record)
+            
+            # Update sample count in UI
+            self.lbl_rec_samples.setText(f"Próbki: {len(self.recording_data)}")
             
         # Update Control Panel immediate values
         self.control_panel.update_data(data)
