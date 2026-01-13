@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
         self.control_panel.setpoint_update.connect(self.serial.send_setpoint)
         self.control_panel.calibration_update.connect(self.serial.send_calibration)
         self.control_panel.mode_update.connect(self.serial.send_control_mode)
+        self.control_panel.derivative_mode_update.connect(self.serial.send_derivative_mode)
         
         # Connection Tile Interactions
         self.btn_refresh.clicked.connect(self.serial.list_ports)
@@ -117,6 +118,16 @@ class MainWindow(QMainWindow):
         
         # Initial port list
         self.serial.list_ports()
+
+        # Bezposrednie wysylanie setpointu
+        self.control_panel.setpoint_update.disconnect()
+        self.control_panel.setpoint_update.connect(self._on_setpoint_change)
+
+    def _on_setpoint_change(self, val):
+        self.serial.send_setpoint(val)
+
+
+
 
     def _create_connection_tile(self):
         tile = QWidget()

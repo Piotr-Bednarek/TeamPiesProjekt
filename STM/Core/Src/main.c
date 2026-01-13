@@ -30,22 +30,16 @@
 #include <math.h>
 #include "filters.h"
 #include "calibration.h"
+#include "pid.h"
+#include "crc8.h"
+#include "leds.h"
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-// --- Parametry PID ---
-typedef struct {
-	float Kp;
-	float Ki;
-	float Kd;
-	float prevError;
-	float integral;
-	float prevMeasurement;  // Do obliczania pochodnej na podstawie pomiaru (Derivative-on-Measurement)
-	EMA_Filter_t d_filter;  // Filtr dolnoprzepustowy dla członu różniczkującego
-} ServoPID_Controller;
+// ServoPID_Controller przeniesiony do servo_pid.h
 
 /* USER CODE END PTD */
 
@@ -156,6 +150,10 @@ float err_sum = 0.0f;
 // Tryb sterowania: 0 = GUI (Manual), 1 = Analog (Potencjometr)
 volatile uint8_t control_mode = 0;
 
+// Kontroler PID (CMSIS DSP) - globalny dla możliwości reinicjalizacji
+PID_Controller_t g_pid_ctrl;
+volatile uint8_t g_pid_needs_reinit = 0;
+
 // Debugging
 volatile uint32_t g_adc_raw = 0;
 volatile float g_pot_setpoint = 0.0f;
@@ -177,9 +175,7 @@ void StartControlTask(void const * argument);
 /* USER CODE BEGIN PFP */
 
 void SetServoAngle(float angle);
-void ServoPID_Init(ServoPID_Controller *pid);
-float ServoPID_Compute(ServoPID_Controller *pid, float error, float measurement);
-void TestLED(); // Funkcja testowa dla weryfikacji połączenia LED
+// Funkcje PID, CRC8, LEDs przeniesione do osobnych modułów
 
 /* USER CODE END PFP */
 
@@ -203,84 +199,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	}
 }
 
-void ServoPID_Init(ServoPID_Controller *pid) {
-	pid->Kp = 0.0f;
-	pid->Ki = 0.0f;
-	pid->Kd = 0.0f;
-	pid->prevError = 0.0f;
-	pid->integral = 0.0f;
-	pid->prevMeasurement = 0.0f;
-	EMA_Init(&pid->d_filter, D_FILTER_ALPHA);
-}
-
-float ServoPID_Compute(ServoPID_Controller *pid, float error, float measurement) {
-	pid->Kp = g_Kp;
-	pid->Ki = g_Ki;
-	pid->Kd = g_Kd;
-
-	// 1. Obliczamy D (Derivative) najpierw, aby znać jej wpływ na wyjście
-	float D = 0.0f;
-	float raw_derivative = -(measurement - pid->prevMeasurement);
-
-	if (raw_derivative > -D_DEADBAND && raw_derivative < D_DEADBAND) {
-		raw_derivative = 0.0f;
-	}
-	float filtered_derivative = EMA_Update(&pid->d_filter, raw_derivative);
-	D = pid->Kd * filtered_derivative;
-	pid->prevMeasurement = measurement; // Update state
-
-	// 2. Obliczamy P (Proportional)
-	float P = pid->Kp * error;
-
-	// 3. Obliczamy Anti-Windup (Clamping)
-	// Obliczamy wyjście bez nowej całki (używamy starej całki)
-	float old_I = pid->Ki * pid->integral;
-	float tentative_output = SERVO_CENTER + P + old_I + D;
-
-	int saturated = 0;
-	// Sprawdzamy czy to wyjście przekracza limity
-	if (tentative_output > SERVO_MAX_LIMIT) {
-		saturated = 1; // Nasycenie górne
-	} else if (tentative_output < SERVO_MIN_LIMIT) {
-		saturated = -1; // Nasycenie dolne
-	}
-
-	// Decyzja o całkowaniu:
-	// Całkujemy jeśli:
-	// a) Nie ma nasycenia (saturated == 0)
-	// b) Nasycenie jest górne (1), ale błąd * Ki ma znak ujemny (chce zmniejszyć wyjście)
-	// c) Nasycenie jest dolne (-1), ale błąd * Ki ma znak dodatni (chce zwiększyć wyjście)
-
-	// Uwaga: Znak zmiany całki zależy od znaku (error * Ki).
-	// Jeśli Ki jest ujemne, to error>0 zmniejsza całkę (ujemny wkład).
-
-	float integration_contribution = error * pid->Ki;
-
-	if (saturated == 0) {
-		pid->integral += error;
-	} else if (saturated == 1 && integration_contribution < 0) {
-		// Jesteśmy na MAX limicie, ale sterownik chce zmniejszyć wyjście -> POZWÓL CAŁKOWAĆ
-		pid->integral += error;
-	} else if (saturated == -1 && integration_contribution > 0) {
-		// Jesteśmy na MIN limicie, ale sterownik chce zwiększyć wyjście -> POZWÓL CAŁKOWAĆ
-		pid->integral += error;
-	}
-
-	// Twardy limit całki (failsafe)
-	if (pid->integral > 3000.0f)
-		pid->integral = 3000.0f;
-	if (pid->integral < -3000.0f)
-		pid->integral = -3000.0f;
-
-	// 4. Finalne wyjście
-	float new_I = pid->Ki * pid->integral;
-	float output = SERVO_CENTER + P + new_I + D;
-
-	pid->prevError = error;
-
-	return output;
-}
-
 void SetServoAngle(float angle) {
 	// Sterowanie serwem SG90/MG996R:
 	// 0 stopni = impuls ~500us
@@ -293,61 +211,6 @@ void SetServoAngle(float angle) {
 
 	uint32_t pulse_length = (uint32_t) (500.0f + (angle / 180.0f) * 2000.0f);
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_length);
-}
-
-uint8_t CalculateCRC8(const char *data, int len) {
-	uint8_t crc = 0x00;
-	for (int i = 0; i < len; i++) {
-		crc ^= data[i];
-		for (uint8_t j = 0; j < 8; j++) {
-			if (crc & 0x80)
-				crc = (crc << 1) ^ 0x07;
-			else
-				crc <<= 1;
-		}
-	}
-	return crc;
-}
-
-// Funkcja testowa - zapala/gasi LED_ERR_1 (PE2) co 500ms
-void TestLED() {
-	static uint32_t last_toggle = 0;
-	
-	if (HAL_GetTick() - last_toggle > 500) {
-		HAL_GPIO_TogglePin(LED_ERR_PORT, LED_ERR_1_Pin);
-		last_toggle = HAL_GetTick();
-	}
-}
-
-// Funkcja docelowa dla 5 diod (R-Ż-Z-Ż-R)
-void UpdateErrorLEDs_5LED(float error) {
-	// Wyłącz wszystkie LEDy (PE2..PE6)
-	HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | 
-	                         LED_ERR_4_Pin | LED_ERR_5_Pin, GPIO_PIN_RESET);
-	
-	// Progi: 
-	// 1% z 290mm = 2.9mm
-	// 5% z 290mm = 14.5mm
-	float limit_green = 2.9f;
-	float limit_yellow = 14.5f;
-	
-	if (error < -limit_yellow) {
-		// Duży ujemny -> Czerwona (PE2 - LED_ERR_1)
-		HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin, GPIO_PIN_SET);
-	} else if (error < -limit_green) {
-		// Średni ujemny -> Żółta (PE3 - LED_ERR_2)
-		HAL_GPIO_WritePin(GPIOE, LED_ERR_2_Pin, GPIO_PIN_SET);
-	} else if (error <= limit_green) { 
-		// Mały błąd (+/- 2.9mm) -> Zielona (PE4 - LED_ERR_3)
-		// Uwaga: W main.h zdefiniowalismy LED_ERR_3_Pin jako PE4
-		HAL_GPIO_WritePin(GPIOE, LED_ERR_3_Pin, GPIO_PIN_SET);
-	} else if (error <= limit_yellow) {
-		// Średni dodatni -> Żółta (PE5 - LED_ERR_4)
-		HAL_GPIO_WritePin(GPIOE, LED_ERR_4_Pin, GPIO_PIN_SET);
-	} else {
-		// Duży dodatni -> Czerwona (PE6 - LED_ERR_5)
-		HAL_GPIO_WritePin(GPIOE, LED_ERR_5_Pin, GPIO_PIN_SET);
-	}
 }
 
 /* USER CODE END 0 */
@@ -936,9 +799,11 @@ void StartControlTask(void const * argument)
 	// Start ADC nie jest potrzebny tutaj w trybie Single, będziemy startować w pętli
 	// HAL_ADC_Start(&hadc1);
 
-	// Inicjalizacja kontrolera PID
-	ServoPID_Controller pid;
-	ServoPID_Init(&pid);
+	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
+	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
+	
+	// Ustaw serwo na pozycję środkową przy starcie
+	SetServoAngle(SERVO_CENTER);
 
 	// Zmienne pomocnicze do walidacji odczytów
 	float prev_valid_dist = 145.0f;
@@ -950,6 +815,12 @@ void StartControlTask(void const * argument)
 	/* Infinite loop */
 	for (;;) {
 		loop_counter++;
+		
+		// Aktualizacja wzmocnień PID (bez resetu stanu - zachowuje pozycję serwa)
+		if (g_pid_needs_reinit) {
+			PID_UpdateGains(&g_pid_ctrl, g_Kp, g_Ki, g_Kd);
+			g_pid_needs_reinit = 0;
+		}
 
 		// Obsługa komend UART
 		if (cmd_received) {
@@ -959,12 +830,19 @@ void StartControlTask(void const * argument)
 					g_setpoint = 0.0f;
 				if (g_setpoint > 250.0f)
 					g_setpoint = 250.0f;
-			} else if (rx_buffer[0] == 'P' && rx_buffer[1] == ':')
+			} else if (rx_buffer[0] == 'P' && rx_buffer[1] == ':') {
 				g_Kp = atof((char*) &rx_buffer[2]);
-			else if (rx_buffer[0] == 'I' && rx_buffer[1] == ':')
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'I' && rx_buffer[1] == ':') {
 				g_Ki = atof((char*) &rx_buffer[2]);
-			else if (rx_buffer[0] == 'D' && rx_buffer[1] == ':')
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'D' && rx_buffer[1] == ':') {
 				g_Kd = atof((char*) &rx_buffer[2]);
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
+				uint8_t mode = (uint8_t) atoi((char*) &rx_buffer[2]);
+				PID_SetMode(&g_pid_ctrl, mode);
+			}
 			// Komendy Kalibracji
 			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
 			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
@@ -1139,7 +1017,8 @@ void StartControlTask(void const * argument)
 			pid_error = 0.0f;
 		}
 
-		float pid_angle = ServoPID_Compute(&pid, pid_error, filtered_dist);
+		float pid_output = PID_Compute(&g_pid_ctrl, g_setpoint, filtered_dist);
+		float pid_angle = pid_output;  // CMSIS PID już zwraca wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
 		UpdateErrorLEDs_5LED(current_error); // Wizualizacja 5-LED
 		// TestLED();
 		
@@ -1171,9 +1050,14 @@ void StartControlTask(void const * argument)
 			pid_angle = prev_servo_angle - max_angle_change;
 		}
 
+		// Zabezpieczenie przed NaN (Not a Number)
+		if (isnan(pid_angle) || isinf(pid_angle)) {
+			pid_angle = SERVO_CENTER;
+		}
+
 		if (pid_angle < SERVO_MIN_LIMIT)
 			pid_angle = SERVO_MIN_LIMIT;
-		if (pid_angle > SERVO_MAX_LIMIT)
+		else if (pid_angle > SERVO_MAX_LIMIT) // Użyj else if dla optymalizacji
 			pid_angle = SERVO_MAX_LIMIT;
 
 		prev_servo_angle = pid_angle;
@@ -1204,7 +1088,7 @@ void StartControlTask(void const * argument)
 		sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
 		HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10); // Timeout 10ms
 
-		osDelay(10); // Loop delay
+		osDelay(PID_DT_MS); // Loop delay
 	}
   /* USER CODE END StartControlTask */
 }
