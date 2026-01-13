@@ -80,7 +80,7 @@ class SerialManager(QObject):
             "filtered": 0,
             "error": 0,
             "control": 0,
-            "setpoint": 150,
+            "setpoint": 125,
             "freq": 0
         }
         self.sample_count = 0

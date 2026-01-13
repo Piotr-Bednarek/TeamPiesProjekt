@@ -52,7 +52,7 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 //Konfiguracja rampy
-#define SETPOINT_DEFAULT   100.0f
+#define SETPOINT_DEFAULT   125.0f
 #define BALL_RADIUS        20
 #define PID_DT_MS          30
 
@@ -1142,6 +1142,24 @@ void StartControlTask(void const * argument)
 		float pid_angle = ServoPID_Compute(&pid, pid_error, filtered_dist);
 		UpdateErrorLEDs_5LED(current_error); // Wizualizacja 5-LED
 		// TestLED();
+		
+		// --- Feedforward dla trybu Sinus ---
+		// Analityczna pochodna: d(setpoint)/dt = amplitude * (2π/period) * cos(2π*t/period)
+		if (control_mode == 2) {
+			float t = (float)HAL_GetTick() / 1000.0f;
+			float period = 5.0f;
+			float amplitude = 50.0f;
+			float omega = 2.0f * 3.14159f / period;  // częstotliwość kątowa
+			
+			float setpoint_derivative = amplitude * omega * cosf(omega * t);
+			
+			// Kff - współczynnik feedforward (do dostrojenia)
+			float Kff = 0.2f;
+			float feedforward = Kff * setpoint_derivative;
+			
+			// Dodaj feedforward do wyjścia PID
+			pid_angle += feedforward;
+		}
 
 		static float prev_servo_angle = SERVO_CENTER;
 		float max_angle_change = 180.0f;

@@ -10,7 +10,7 @@ class BeamVisualizer(QWidget):
         self.setMinimumHeight(70)
         self.setMaximumHeight(90)
         self.distance = 0
-        self.setpoint = 150
+        self.setpoint = 125
         self.min_val = 0
         self.max_val = 250
         self.margin = 25  # Space on left and right
