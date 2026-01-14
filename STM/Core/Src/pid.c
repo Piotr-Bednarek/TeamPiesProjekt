@@ -11,6 +11,7 @@
  */
 
 #include "pid.h"
+#include "main.h"  // Dla SERVO_CENTER
 
 /**
  * @brief Inicjalizuje regulator PID.
@@ -37,7 +38,7 @@ void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd, float min_out
     // Inicjalizacja filtra błędu z wartością 0 (brak początkowego błędu)
     // to zapobiega skokowi wyjścia przy pierwszym obliczeniu
     EMA_Init(&pid->error_filter, 0.8f);
-    pid->error_filter.filtered_value = 0.0f; // Rozpocznij od zerowego błędu
+    pid->error_filter.filtered_value = 0.0f;
     pid->error_filter.initialized = 1;
     
     pid->output_min = min_out;
@@ -88,11 +89,11 @@ float PID_Compute(PID_Controller_t *pid, float setpoint, float measured) {
     }
     pid->prev_meas = measured;
     
-    // Wyjście PID jest offsetem od centrum (SERVO_CENTER = 100)
-    // Saturacja do zakresu [min-100, max-100] = [-50, +50]
-    float center = 100.0f;
-    float max_offset = pid->output_max - center;  // +50
-    float min_offset = pid->output_min - center;  // -50
+    // Wyjście PID jest offsetem od centrum (zdefiniowane w main.h)
+    // Saturacja do zakresu [min-SERVO_CENTER, max-SERVO_CENTER]
+    float center = SERVO_CENTER;
+    float max_offset = pid->output_max - center;  
+    float min_offset = pid->output_min - center;  
     
     if (out > max_offset) {
         out = max_offset;
@@ -110,7 +111,7 @@ float PID_Compute(PID_Controller_t *pid, float setpoint, float measured) {
     }
     
     // Dodaj centrum aby uzyskać finalny kąt serwa
-    return center + out;
+    return SERVO_CENTER + out;
 }
 
 /**
@@ -137,7 +138,6 @@ void PID_UpdateGains(PID_Controller_t *pid, float Kp, float Ki, float Kd) {
     float32_t state1 = pid->instance.state[1];
     float32_t state2 = pid->instance.state[2];
     
-    // Aktualizuj wzmocnienia
     // Aktualizuj wzmocnienia
     pid->instance.Kp = Kp;
     pid->instance.Ki = Ki;

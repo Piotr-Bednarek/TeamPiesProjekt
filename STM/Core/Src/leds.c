@@ -6,9 +6,9 @@
  * @brief   Implementacja modułu wyświetlania błędu na LEDach.
  *
  * Wizualizacja uchybu regulacji na 5 diodach LED (PE2-PE6):
- * - PE2, PE6: Czerwone (duży błąd)
- * - PE3, PE5: Żółte (średni błąd)
- * - PE4: Zielona (mały błąd - OK)
+ * - PE2, PE6: Czerwone (>+-5%)
+ * - PE3, PE5: Żółte (+-5%)
+ * - PE4: Zielona (+-1%)
  ******************************************************************************
  */
 

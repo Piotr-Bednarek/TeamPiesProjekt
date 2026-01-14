@@ -13,19 +13,14 @@
  */
 
 #include "servo_pid.h"
+#include "main.h"  // Dla SERVO_CENTER i limitów
 
 // Zewnętrzne zmienne globalne (z main.c)
 extern volatile float g_Kp;
 extern volatile float g_Ki;
 extern volatile float g_Kd;
 
-// Stałe konfiguracyjne
-#define D_DEADBAND         0.5f   // mm - strefa nieczułości dla członu D
-#define D_FILTER_ALPHA     0.25f  // Wygładzanie dla członu D (0.0 - 1.0)
-
-#define SERVO_CENTER       100.0f
-#define SERVO_MIN_LIMIT    50.0f
-#define SERVO_MAX_LIMIT    150.0f
+// Stałe konfiguracyjne (zdefiniowane w main.h)
 
 /**
  * @brief Inicjalizuje regulator ServoPID.

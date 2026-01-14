@@ -129,6 +129,32 @@ void Error_Handler(void);
 #define LD2_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+// --- Global System Settings ---
+#define PID_DT_MS          30
+#define SETPOINT_DEFAULT   125.0f
+#define BALL_RADIUS        20
+#define AVG_ERR_SAMPLES    35
+
+// --- Logic Modes ---
+#define SENSOR_TEST_MODE   0
+#define USE_CALIBRATION    1
+
+// --- Servo Configuration ---
+#define SERVO_CENTER       100.0f
+#define SERVO_MIN_LIMIT    60.0f
+#define SERVO_MAX_LIMIT    140.0f
+#define SERVO_ANGLE_DEADBAND 0.8f
+#define SERVO_SMOOTHING_SIZE 1
+
+// --- Servo Hardware (PWM) ---
+#define SERVO_MIN_CCR      500
+#define SERVO_MAX_CCR      2500
+#define SERVO_MAX_ANGLE    200
+
+// --- PID & Filtration ---
+#define D_DEADBAND         0.5f
+#define D_FILTER_ALPHA     0.25f
+
 // --- LED Error Bar ---
 #define LED_ERR_PORT      GPIOE
 #define LED_ERR_1_Pin     GPIO_PIN_2

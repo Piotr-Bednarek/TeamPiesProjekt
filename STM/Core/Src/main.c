@@ -43,36 +43,6 @@
 
 /* USER CODE END PTD */
 
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-//Konfiguracja rampy
-#define SETPOINT_DEFAULT   125.0f
-#define BALL_RADIUS        20
-#define PID_DT_MS          30
-
-// Zakres ruchu serwa
-#define SERVO_CENTER       100.0f
-#define SERVO_MIN_LIMIT    60.0f
-#define SERVO_MAX_LIMIT    140.0f
-
-// Ustawienia sprzętowe Serwa (PWM)
-#define SERVO_MIN_CCR      500
-#define SERVO_MAX_CCR      2500
-#define SERVO_MAX_ANGLE    200
-
-// Tryby
-#define SENSOR_TEST_MODE   0  // 1: logowanie surowych danych (debugowanie)
-#define USE_CALIBRATION    1  // 1: użyj kalibracji 5-punktowej, 0: surowe dane
-
-// Ustawienia PID i Filtracji
-#define D_DEADBAND         0.5f   // mm - strefa nieczułości dla członu D
-#define D_FILTER_ALPHA     0.25f  // Wygładzanie dla członu D (0.0 - 1.0)
-
-// Wygładzanie Serwa
-#define SERVO_ANGLE_DEADBAND  0.8f // Strefa nieczułości serwa (0.8 stopnia) - ignoruje małe drgania
-#define SERVO_SMOOTHING_SIZE  1    // Ilość próbek do wygładzania ruchu
-
-#define AVG_ERR_SAMPLES       35   // Liczba próbek do średniego uchybu (ok. 1 sekunda)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -131,15 +101,15 @@ volatile float g_Ki = 0.0053f;     // Wzmocnienie całkujące (dodatnie po obroc
 volatile float g_Kd = 5.0f;        // Wzmocnienie różniczkujące (dodatnie po obrocie serwa)
 
 // Zmienne kalibracji
-volatile uint8_t calibration_mode = 0;
-volatile float cal_raw_min = 9999.0f;
-volatile float cal_raw_max = 0.0f;
-volatile uint32_t cal_start_time = 0;
+// volatile uint8_t calibration_mode = 0;
+// volatile float cal_raw_min = 9999.0f;
+// volatile float cal_raw_max = 0.0f;
+// volatile uint32_t cal_start_time = 0;
 
-// Domyślne punkty kalibracyjne
-volatile float sensor_min = 50.0f;
-volatile float sensor_max = 220.0f;
-volatile float sensor_middle = 115.0f;
+// // Domyślne punkty kalibracyjne
+// volatile float sensor_min = 50.0f;
+// volatile float sensor_max = 220.0f;
+// volatile float sensor_middle = 115.0f;
 
 // Bufor średniego uchybu
 float err_buffer[AVG_ERR_SAMPLES];
@@ -745,7 +715,7 @@ void StartControlTask(void const * argument)
 	// Uruchomienie PWM dla serwa (Timer 3, Kanał 1)
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
-	// Czekamy 2 sekundy, aby kondensatory się naładowały i napięcie ustabilizowało.
+	// Czekamy 2 sekundy
 	HAL_UART_Transmit(&huart3, (uint8_t*) "Stabilizing Power...\r\n", 22, 100);
 	osDelay(2000);
 
