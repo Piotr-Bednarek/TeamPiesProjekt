@@ -127,6 +127,9 @@ volatile uint8_t g_pid_needs_reinit = 0;
 volatile uint32_t g_adc_raw = 0;
 volatile float g_pot_setpoint = 0.0f;
 
+// Zmienna współdzielona do wizualizacji błędu na LED
+volatile float g_current_error = 0.0f;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -697,7 +700,75 @@ void StartDefaultTask(void const * argument)
   /* USER CODE BEGIN 5 */
 	/* Infinite loop */
 	for (;;) {
-		osDelay(1);
+		// Obsługa komend UART (przeniesione z ControlTask)
+		if (cmd_received) {
+			if (rx_buffer[0] == 'S' && rx_buffer[1] == ':') {
+				g_setpoint = atof((char*) &rx_buffer[2]); // S:Setpoint
+				if (g_setpoint < 0.0f)
+					g_setpoint = 0.0f;
+				if (g_setpoint > 250.0f)
+					g_setpoint = 250.0f;
+			} else if (rx_buffer[0] == 'P' && rx_buffer[1] == ':') {
+				g_Kp = atof((char*) &rx_buffer[2]);
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'I' && rx_buffer[1] == ':') {
+				g_Ki = atof((char*) &rx_buffer[2]);
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'D' && rx_buffer[1] == ':') {
+				g_Kd = atof((char*) &rx_buffer[2]);
+				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
+				uint8_t mode = (uint8_t) atoi((char*) &rx_buffer[2]);
+				PID_SetMode(&g_pid_ctrl, mode);
+			}
+			// Komendy Kalibracji
+			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
+			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
+				int cal_idx = rx_buffer[3] - '0'; // Indeks punktu
+				if (cal_idx >= 0 && cal_idx < 5) {
+					char *comma = strchr((char*) &rx_buffer[5], ',');
+					if (comma != NULL) {
+						*comma = '\0';
+						float raw_val = atof((char*) &rx_buffer[5]);
+						float actual_val = atof(comma + 1);
+
+						// Aktualizacja w bibliotece kalibracyjnej
+						Calibration_UpdatePoint(cal_idx, raw_val, actual_val);
+
+						// Sprawdzenie czy mamy komplet punktów
+						if (Calibration_IsReady()) {
+							sprintf(msg, "[CAL] ✅ All points received! System READY!\r\n");
+							HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+						} else {
+							// Potwierdzenie przyjęcia punktu
+							int r_i = (int) raw_val;
+							int r_d = (int) ((raw_val - r_i) * 10);
+							int a_i = (int) actual_val;
+							int a_d = (int) ((actual_val - a_i) * 10);
+
+							sprintf(msg, "[CAL] Point %d: RAW=%d.%d -> POS=%d.%d (%d/5)\r\n", cal_idx, r_i, abs(r_d),
+									a_i, abs(a_d), __builtin_popcount(Calibration_GetReceivedPointsMask()));
+							HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+						}
+					}
+				}
+			} else if (rx_buffer[0] == 'M' && rx_buffer[1] == ':') {
+				// M:0 -> GUI, M:1 -> Potencjometr, M:2 -> Sinus
+				control_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
+				const char* mode_names[] = {"GUI", "ANALOG", "SINUS"};
+				if (control_mode <= 2) {
+					sprintf(msg, "MODE: %s\r\n", mode_names[control_mode]);
+					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+				}
+			}
+
+			cmd_received = 0;
+		}
+
+		// Aktualizacja LEDów błędu (niekrytyczne czasowo)
+		UpdateErrorLEDs_5LED(g_current_error);
+
+		osDelay(5); // 5ms - wystarczająco szybko dla UART
 	}
   /* USER CODE END 5 */
 }
@@ -791,70 +862,7 @@ void StartControlTask(void const * argument)
 			g_pid_needs_reinit = 0;
 		}
 
-		// Obsługa komend UART
-		if (cmd_received) {
-			if (rx_buffer[0] == 'S' && rx_buffer[1] == ':') {
-				g_setpoint = atof((char*) &rx_buffer[2]); // S:Setpoint
-				if (g_setpoint < 0.0f)
-					g_setpoint = 0.0f;
-				if (g_setpoint > 250.0f)
-					g_setpoint = 250.0f;
-			} else if (rx_buffer[0] == 'P' && rx_buffer[1] == ':') {
-				g_Kp = atof((char*) &rx_buffer[2]);
-				g_pid_needs_reinit = 1;
-			} else if (rx_buffer[0] == 'I' && rx_buffer[1] == ':') {
-				g_Ki = atof((char*) &rx_buffer[2]);
-				g_pid_needs_reinit = 1;
-			} else if (rx_buffer[0] == 'D' && rx_buffer[1] == ':') {
-				g_Kd = atof((char*) &rx_buffer[2]);
-				g_pid_needs_reinit = 1;
-			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
-				uint8_t mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				PID_SetMode(&g_pid_ctrl, mode);
-			}
-			// Komendy Kalibracji
-			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
-			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
-				int cal_idx = rx_buffer[3] - '0'; // Indeks punktu
-				if (cal_idx >= 0 && cal_idx < 5) {
-					char *comma = strchr((char*) &rx_buffer[5], ',');
-					if (comma != NULL) {
-						*comma = '\0';
-						float raw_val = atof((char*) &rx_buffer[5]);
-						float actual_val = atof(comma + 1);
-
-						// Aktualizacja w bibliotece kalibracyjnej
-						Calibration_UpdatePoint(cal_idx, raw_val, actual_val);
-
-						// Sprawdzenie czy mamy komplet punktów
-						if (Calibration_IsReady()) {
-							sprintf(msg, "[CAL] ✅ All points received! System READY!\r\n");
-							HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-						} else {
-							// Potwierdzenie przyjęcia punktu
-							int r_i = (int) raw_val;
-							int r_d = (int) ((raw_val - r_i) * 10);
-							int a_i = (int) actual_val;
-							int a_d = (int) ((actual_val - a_i) * 10);
-
-							sprintf(msg, "[CAL] Point %d: RAW=%d.%d -> POS=%d.%d (%d/5)\r\n", cal_idx, r_i, abs(r_d),
-									a_i, abs(a_d), __builtin_popcount(Calibration_GetReceivedPointsMask()));
-							HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-						}
-					}
-				}
-			} else if (rx_buffer[0] == 'M' && rx_buffer[1] == ':') {
-				// M:0 -> GUI, M:1 -> Potencjometr, M:2 -> Sinus
-				control_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				const char* mode_names[] = {"GUI", "ANALOG", "SINUS"};
-				if (control_mode <= 2) {
-					sprintf(msg, "MODE: %s\r\n", mode_names[control_mode]);
-					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-				}
-			}
-
-			cmd_received = 0;
-		}
+		// Obsługa komend UART przeniesiona do StartDefaultTask
 
 		// Odczyt dystansu w trybie continuous
 		distance = readRangeContinuousMillimeters(&distanceStr);
@@ -981,8 +989,8 @@ void StartControlTask(void const * argument)
 
 		float pid_output = PID_Compute(&g_pid_ctrl, g_setpoint, filtered_dist);
 		float pid_angle = pid_output;  // CMSIS PID już zwraca wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
-		UpdateErrorLEDs_5LED(current_error); // Wizualizacja 5-LED
-		// TestLED();
+		g_current_error = current_error; // Przekaż błąd do defaultTask (wizualizacja LED)
+		// UpdateErrorLEDs_5LED przeniesione do StartDefaultTask
 		
 		// --- Feedforward dla trybu Sinus ---
 		// Analityczna pochodna: d(setpoint)/dt = amplitude * (2π/period) * cos(2π*t/period)

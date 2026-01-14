@@ -212,9 +212,9 @@ class ControlPanel(QWidget):
         pid_layout.addLayout(pid_header)
         
         # Sliders
-        self.sli_kp = SliderControl("Kp", 0.0, 2.0, 0.01, 0.15)
-        self.sli_ki = SliderControl("Ki", 0.0, 0.01, 0.0001, 0.0025)
-        self.sli_kd = SliderControl("Kd", 0.0, 10.0, 0.1, 6.0)
+        self.sli_kp = SliderControl("Kp", 0.0, 2.0, 0.01, 0.44)
+        self.sli_ki = SliderControl("Ki", 0.0, 0.01, 0.0001, 0.0053)
+        self.sli_kd = SliderControl("Kd", 0.0, 10.0, 0.1, 5.0)
         
         # Connect commit signals individually
         self.sli_kp.value_committed.connect(self._on_kp_change)
