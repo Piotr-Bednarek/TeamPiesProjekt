@@ -165,6 +165,10 @@ class SerialManager(QObject):
         # mode: 0 = Standard (CMSIS PID), 1 = Derivative on Measurement (Kick-Free)
         self.send_command(f"X:{mode}")
 
+    def send_regulator_state(self, state):
+        # state: 0 = Stop, 1 = Start/Run
+        self.send_command(f"R:{state}")
+
     @Slot(str)
     def handle_line(self, line):
         # CRC Check

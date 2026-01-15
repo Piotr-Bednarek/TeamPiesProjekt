@@ -3,7 +3,7 @@ import time
 import csv
 import os
 from datetime import datetime
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog, QTabWidget
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 
@@ -31,33 +31,50 @@ class MainWindow(QMainWindow):
         self.recording_start_time = 0
         
         # --- UI Setup ---
+        # Create main central widget with connection bar always visible
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         
-        self.main_layout = QVBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.root_layout = QVBoxLayout(self.central_widget)
+        self.root_layout.setContentsMargins(10, 10, 10, 10)
+        self.root_layout.setSpacing(10)
+        
+        # Global Connection Row (visible on all tabs)
+        self.connection_row = QHBoxLayout()
+        self.connection_row.setSpacing(8)
+        
+        self.conn_tile = self._create_connection_tile()
+        self.connection_row.addWidget(self.conn_tile)
+        
+        # Regulator Start/Stop Tile
+        self.regulator_tile = self._create_regulator_tile()
+        self.connection_row.addWidget(self.regulator_tile)
+        
+        self.connection_row.addStretch()
+        
+        self.root_layout.addLayout(self.connection_row)
+        
+        # Tab widget below connection bar
+        self.tab_widget = QTabWidget()
+        self.root_layout.addWidget(self.tab_widget, stretch=1)
+        
+        # --- Tab 1: Sterowanie (main control panel) ---
+        self.control_tab = QWidget()
+        self.main_layout = QVBoxLayout(self.control_tab)
+        self.main_layout.setContentsMargins(0, 10, 0, 0)
         self.main_layout.setSpacing(10)
         
-        # 1. Top Row: Connection Tile + Metrics
-        # We need to insert a connection tile before the metrics metrics
-        # But MetricsPanel is a hardcoded grid. Let's wrap them in a HBox or modify MetricsPanel.
-        # The user wants "przycisk z laczeniem niech bedzie jako kolejny kafelek ale na poczatku"
-        
+        # 1. Top Row: Recording Tile + Metrics (connection moved to global bar)
         self.top_row_layout = QHBoxLayout()
         self.top_row_layout.setSpacing(8)
         
-        # 1.1 Connection Tile
-        self.conn_tile = self._create_connection_tile()
-        self.top_row_layout.addWidget(self.conn_tile)
-        
-        # 1.2 Recording Tile
+        # 1.1 Recording Tile
         self.rec_tile = self._create_recording_tile()
         self.top_row_layout.addWidget(self.rec_tile)
         
-        # 1.3 Metrics Panel (modified to be added to layout)
+        # 1.2 Metrics Panel
         self.metrics_panel = MetricsPanel()
         self.top_row_layout.addWidget(self.metrics_panel)
-        # Assuming MetricsPanel expects to expand? It's a HBox of cards.
         
         self.main_layout.addLayout(self.top_row_layout)
         
@@ -83,9 +100,15 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left_widget)
         splitter.addWidget(self.charts_panel)
         splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3) # Right side bigger but less dominant
+        splitter.setStretchFactor(1, 3)
         
         self.main_layout.addWidget(splitter, stretch=1)
+        
+        # Add first tab
+        self.tab_widget.addTab(self.control_tab, "Sterowanie")
+        
+        # --- Tab 2: CSV Signal Player ---
+        self._create_csv_player_tab()
         
         # --- Wire Signals ---
         
@@ -132,48 +155,236 @@ class MainWindow(QMainWindow):
     def _create_connection_tile(self):
         tile = QWidget()
         tile.setProperty("class", "card") 
-        tile.setFixedWidth(260) # Compact width
+        tile.setFixedWidth(320)
         
-        layout = QVBoxLayout(tile)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
+        layout = QHBoxLayout(tile)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
         
-        # Status Label (replaces Title and Badge)
-        self.lbl_status = QLabel("STATUS: ROZŁĄCZONY")
-        self.lbl_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+        # Status Label
+        self.lbl_status = QLabel("ROZŁĄCZONY")
+        self.lbl_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 10px;")
+        self.lbl_status.setFixedWidth(75)
         layout.addWidget(self.lbl_status)
         
-        # Controls Row (Combo + Refresh + Connect)
-        row_controls = QHBoxLayout()
-        row_controls.setSpacing(5)
-        
+        # Port Combo
         self.combo_ports = QComboBox()
+        self.combo_ports.setFixedHeight(26)
         self.combo_ports.setStyleSheet("""
             QComboBox { 
                 background-color: rgba(255,255,255,0.05); 
                 border: 1px solid #444; 
-                padding: 3px; 
+                padding: 2px; 
                 color: white;
+                font-size: 10px;
             }
             QComboBox:disabled { color: #555; border-color: #222; }
         """)
-        self.combo_ports.setSizePolicy(self.combo_ports.sizePolicy().horizontalPolicy(), self.combo_ports.sizePolicy().verticalPolicy())
+        layout.addWidget(self.combo_ports, stretch=1)
         
+        # Refresh Button
         self.btn_refresh = QPushButton("↻")
-        self.btn_refresh.setFixedSize(28, 28)
-        self.btn_refresh.setStyleSheet("background-color: rgba(255,255,255,0.05); border: 1px solid #444; font-size: 14px;")
+        self.btn_refresh.setFixedSize(26, 26)
+        self.btn_refresh.setStyleSheet("background-color: rgba(255,255,255,0.05); border: 1px solid #444; font-size: 12px;")
+        layout.addWidget(self.btn_refresh)
         
+        # Connect Button
         self.btn_connect = QPushButton("Połącz")
         self.btn_connect.setObjectName("connectBtn")
-        self.btn_connect.setFixedHeight(28) # Match refresh button height
-        
-        row_controls.addWidget(self.combo_ports, stretch=1)
-        row_controls.addWidget(self.btn_refresh)
-        row_controls.addWidget(self.btn_connect)
-        
-        layout.addLayout(row_controls)
+        self.btn_connect.setFixedHeight(26)
+        layout.addWidget(self.btn_connect)
         
         return tile
+
+    def _create_regulator_tile(self):
+        tile = QWidget()
+        tile.setProperty("class", "card") 
+        tile.setFixedWidth(140)
+        
+        layout = QHBoxLayout(tile)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+        
+        # LED indicators (red = stop, green = run) - using fixed size widgets
+        self.led_red = QLabel()
+        self.led_red.setFixedSize(16, 16)
+        self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")  # Active (stop state)
+        layout.addWidget(self.led_red)
+        
+        self.led_green = QLabel()
+        self.led_green.setFixedSize(16, 16)
+        self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")  # Dim (inactive)
+        layout.addWidget(self.led_green)
+        
+        # Start/Stop Button
+        self.btn_regulator = QPushButton("START")
+        self.btn_regulator.setObjectName("startBtn")
+        self.btn_regulator.setFixedSize(60, 26)
+        self.btn_regulator.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:disabled { background-color: #444; color: #666; }
+        """)
+        self.btn_regulator.clicked.connect(self._toggle_regulator)
+        layout.addWidget(self.btn_regulator)
+        
+        # Track regulator state
+        self.regulator_running = False
+        
+        return tile
+
+    def _create_csv_player_tab(self):
+        """Create Tab 2: Test Runner with charts and export"""
+        import pyqtgraph as pg
+        
+        self.csv_tab = QWidget()
+        csv_layout = QVBoxLayout(self.csv_tab)
+        csv_layout.setContentsMargins(0, 10, 0, 0)
+        csv_layout.setSpacing(10)
+        
+        # Main content splitter (same layout as tab 1)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(2)
+        
+        # --- Left Panel: Test Controls ---
+        left_widget = QWidget()
+        left_widget.setProperty("class", "card")
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(15, 15, 15, 15)
+        left_layout.setSpacing(10)
+        
+        # Header
+        header = QLabel("TEST IDENTYFIKACJI")
+        header.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px;")
+        left_layout.addWidget(header)
+        
+        # Info
+        info_label = QLabel("Sygnał sterujący wgrany na STM32.\nPrzycisk START uruchamia test.")
+        info_label.setStyleSheet("color: #666; font-size: 10px;")
+        info_label.setWordWrap(True)
+        left_layout.addWidget(info_label)
+        
+        # Start Test Button
+        self.btn_test_start = QPushButton("▶ START TEST")
+        self.btn_test_start.setFixedHeight(40)
+        self.btn_test_start.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:disabled { background-color: #444; color: #666; }
+        """)
+        self.btn_test_start.clicked.connect(self._start_identification_test)
+        left_layout.addWidget(self.btn_test_start)
+        
+        # Recording status
+        self.lbl_test_status = QLabel("Status: Oczekiwanie")
+        self.lbl_test_status.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        left_layout.addWidget(self.lbl_test_status)
+        
+        self.lbl_test_samples = QLabel("Próbki: 0")
+        self.lbl_test_samples.setStyleSheet("color: #3b82f6; font-size: 11px; font-weight: bold;")
+        left_layout.addWidget(self.lbl_test_samples)
+        
+        # Export Button
+        self.btn_test_export = QPushButton("💾 EKSPORT CSV")
+        self.btn_test_export.setFixedHeight(35)
+        self.btn_test_export.setStyleSheet("""
+            QPushButton { 
+                background-color: #3b82f6; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #2563eb; }
+        """)
+        self.btn_test_export.clicked.connect(self._export_test_data)
+        left_layout.addWidget(self.btn_test_export)
+        
+        # Clear Button
+        self.btn_test_clear = QPushButton("🗑 WYCZYŚĆ")
+        self.btn_test_clear.setFixedHeight(30)
+        self.btn_test_clear.setStyleSheet("""
+            QPushButton { 
+                background-color: #64748b; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #475569; }
+        """)
+        self.btn_test_clear.clicked.connect(self._clear_test_data)
+        left_layout.addWidget(self.btn_test_clear)
+        
+        left_layout.addStretch()
+        
+        # --- Right Panel: Charts ---
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+        
+        # Header
+        chart_header = QLabel("WYKRESY W CZASIE RZECZYWISTYM")
+        chart_header.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px; margin-left: 5px;")
+        right_layout.addWidget(chart_header)
+        
+        # PyQtGraph setup
+        pg.setConfigOption('background', '#1e293b')
+        pg.setConfigOption('foreground', '#94a3b8')
+        pg.setConfigOptions(antialias=True)
+        
+        # Chart 1: Distance
+        self.csv_plot_dist = pg.PlotWidget()
+        self.csv_plot_dist.showGrid(x=False, y=True, alpha=0.3)
+        self.csv_plot_dist.setYRange(0, 260, padding=0)
+        self.csv_plot_dist.setMouseEnabled(x=False, y=False)
+        self.csv_plot_dist.setTitle("Odległość [mm]", color="#94a3b8", size="10pt")
+        
+        self.csv_curve_dist = self.csv_plot_dist.plot(pen=pg.mkPen(color='#22c55e', width=2))
+        self.csv_curve_filt = self.csv_plot_dist.plot(pen=pg.mkPen(color='#3b82f6', width=2))
+        
+        right_layout.addWidget(self.csv_plot_dist, stretch=1)
+        
+        # Chart 2: Servo Angle
+        self.csv_plot_angle = pg.PlotWidget()
+        self.csv_plot_angle.showGrid(x=False, y=True, alpha=0.3)
+        self.csv_plot_angle.setMouseEnabled(x=False, y=True)
+        self.csv_plot_angle.setTitle("Kąt Serwa [°]", color="#94a3b8", size="10pt")
+        
+        self.csv_curve_angle = self.csv_plot_angle.plot(pen=pg.mkPen(color='#f39c12', width=2))
+        
+        right_layout.addWidget(self.csv_plot_angle, stretch=1)
+        
+        # Add to splitter
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+        
+        csv_layout.addWidget(splitter, stretch=1)
+        
+        self.tab_widget.addTab(self.csv_tab, "Test Identyfikacji")
+        
+        # Test data state
+        self.test_recording = False
+        self.test_data = []
+        self.test_start_time = 0
 
     def _create_recording_tile(self):
         tile = QWidget()
@@ -300,6 +511,50 @@ class MainWindow(QMainWindow):
 
         if current in ports:
             self.combo_ports.setCurrentText(current)
+    
+    def _toggle_regulator(self):
+        if not self.regulator_running:
+            # Start regulator
+            self.regulator_running = True
+            self.serial.send_regulator_state(1)
+            
+            self.btn_regulator.setText("STOP")
+            self.btn_regulator.setStyleSheet("""
+                QPushButton { 
+                    background-color: #ef4444; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 10px;
+                }
+                QPushButton:hover { background-color: #dc2626; }
+                QPushButton:disabled { background-color: #444; color: #666; }
+            """)
+            # LEDs: green ON, red OFF
+            self.led_green.setStyleSheet("background-color: #4ade80; border-radius: 8px;")
+            self.led_red.setStyleSheet("background-color: #3a1a1a; border-radius: 8px;")
+        else:
+            # Stop regulator
+            self.regulator_running = False
+            self.serial.send_regulator_state(0)
+            
+            self.btn_regulator.setText("START")
+            self.btn_regulator.setStyleSheet("""
+                QPushButton { 
+                    background-color: #22c55e; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 10px;
+                }
+                QPushButton:hover { background-color: #16a34a; }
+                QPushButton:disabled { background-color: #444; color: #666; }
+            """)
+            # LEDs: red ON, green OFF
+            self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
+            self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")
             
     def _toggle_connection(self):
         if self.btn_connect.text() == "Połącz":
@@ -330,16 +585,16 @@ class MainWindow(QMainWindow):
         if connected:
             self.btn_connect.setText("Rozłącz")
             self.btn_connect.setObjectName("disconnectBtn")
-            self.lbl_status.setText("STATUS: POŁĄCZONO")
-            self.lbl_status.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+            self.lbl_status.setText("POŁĄCZONO")
+            self.lbl_status.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 10px;")
             self.combo_ports.setEnabled(False)
             self.btn_refresh.setEnabled(False)
             self.btn_connect.setStyle(self.btn_connect.style()) 
         else:
             self.btn_connect.setText("Połącz")
             self.btn_connect.setObjectName("connectBtn")
-            self.lbl_status.setText("STATUS: ROZŁĄCZONY")
-            self.lbl_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 11px; text-transform: uppercase;")
+            self.lbl_status.setText("ROZŁĄCZONY")
+            self.lbl_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 10px;")
             self.combo_ports.setEnabled(True)
             self.btn_refresh.setEnabled(True)
             
@@ -374,6 +629,18 @@ class MainWindow(QMainWindow):
         # Update Control Panel immediate values
         self.control_panel.update_data(data)
         
+        # Collect data for Test Identification tab if recording
+        if hasattr(self, 'test_recording') and self.test_recording:
+            relative_time = current_time - self.test_start_time
+            test_record = {
+                'time': round(relative_time, 4),
+                'distance': data.get('distance', 0),
+                'filtered': data.get('filtered', 0),
+                'control': data.get('control', 0),
+                'setpoint': data.get('setpoint', 0)
+            }
+            self.test_data.append(test_record)
+        
     def _update_ui_tick(self):
         # Called at 10Hz to refresh charts and metrics
         # This decouples high-freq serial data from UI rendering
@@ -388,3 +655,128 @@ class MainWindow(QMainWindow):
         
         # Charts
         self.charts_panel.update_charts(self.data_history)
+        
+        # Update Test Identification tab charts if recording
+        if hasattr(self, 'test_recording') and self.test_recording:
+            self._update_test_charts()
+    
+    def _update_test_charts(self):
+        """Update charts on Test Identification tab"""
+        if not self.test_data:
+            return
+            
+        view_data = self.test_data[-200:]
+        
+        dists = [d.get('distance', 0) for d in view_data]
+        filts = [d.get('filtered', 0) for d in view_data]
+        angles = [d.get('control', 0) for d in view_data]
+        
+        self.csv_curve_dist.setData(dists)
+        self.csv_curve_filt.setData(filts)
+        self.csv_curve_angle.setData(angles)
+        
+        # Update sample count
+        self.lbl_test_samples.setText(f"Próbki: {len(self.test_data)}")
+    
+    def _start_identification_test(self):
+        """Start/stop identification test recording"""
+        if not self.test_recording:
+            # Start test
+            self.test_recording = True
+            self.test_data = []
+            self.test_start_time = time.time()
+            
+            # Send start command to STM32
+            self.serial.send_command("TEST:START")
+            
+            self.btn_test_start.setText("⏹ STOP TEST")
+            self.btn_test_start.setStyleSheet("""
+                QPushButton { 
+                    background-color: #ef4444; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
+                QPushButton:hover { background-color: #dc2626; }
+            """)
+            self.lbl_test_status.setText("Status: Nagrywanie...")
+            self.lbl_test_status.setStyleSheet("color: #22c55e; font-size: 11px;")
+        else:
+            # Stop test
+            self.test_recording = False
+            
+            # Send stop command to STM32
+            self.serial.send_command("TEST:STOP")
+            
+            self.btn_test_start.setText("▶ START TEST")
+            self.btn_test_start.setStyleSheet("""
+                QPushButton { 
+                    background-color: #22c55e; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
+                QPushButton:hover { background-color: #16a34a; }
+            """)
+            self.lbl_test_status.setText(f"Status: Zakończono ({len(self.test_data)} próbek)")
+            self.lbl_test_status.setStyleSheet("color: #94a3b8; font-size: 11px;")
+    
+    def _export_test_data(self):
+        """Export recorded test data to CSV"""
+        if not self.test_data:
+            return
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"test_identyfikacji_{timestamp}.csv"
+        
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Zapisz dane testu",
+            default_filename,
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if filepath:
+            try:
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    fieldnames = ['time', 'distance', 'filtered', 'control', 'setpoint']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(self.test_data)
+                
+                self.lbl_test_status.setText(f"Zapisano: {os.path.basename(filepath)}")
+                self.lbl_test_status.setStyleSheet("color: #22c55e; font-size: 11px;")
+            except Exception as e:
+                self.lbl_test_status.setText(f"Błąd: {e}")
+                self.lbl_test_status.setStyleSheet("color: #ef4444; font-size: 11px;")
+    
+    def _clear_test_data(self):
+        """Clear recorded test data"""
+        self.test_data = []
+        self.test_recording = False
+        
+        # Clear charts
+        self.csv_curve_dist.setData([])
+        self.csv_curve_filt.setData([])
+        self.csv_curve_angle.setData([])
+        
+        self.lbl_test_samples.setText("Próbki: 0")
+        self.lbl_test_status.setText("Status: Oczekiwanie")
+        self.lbl_test_status.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        
+        self.btn_test_start.setText("▶ START TEST")
+        self.btn_test_start.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+        """)
