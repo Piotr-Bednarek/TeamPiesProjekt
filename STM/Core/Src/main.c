@@ -119,6 +119,9 @@ float err_sum = 0.0f;
 // Tryb sterowania: 0 = GUI (Manual), 1 = Analog (Potencjometr)
 volatile uint8_t control_mode = 0;
 
+// Start/Stop regulatora: 0 = wyłączony, 1 = włączony (domyślnie)
+volatile uint8_t g_regulator_enabled = 1;
+
 // Kontroler PID (CMSIS DSP) - globalny dla możliwości reinicjalizacji
 PID_Controller_t g_pid_ctrl;
 volatile uint8_t g_pid_needs_reinit = 0;
@@ -760,6 +763,16 @@ void StartDefaultTask(void const * argument)
 					sprintf(msg, "MODE: %s\r\n", mode_names[control_mode]);
 					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 				}
+			} else if (rx_buffer[0] == 'R' && rx_buffer[1] == ':') {
+				// R:0 -> Stop regulatora, R:1 -> Start regulatora
+				g_regulator_enabled = (uint8_t) atoi((char*) &rx_buffer[2]);
+				sprintf(msg, "REG: %s\r\n", g_regulator_enabled ? "ON" : "OFF");
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+				
+				// Jeśli wyłączony - ustaw serwo na środek
+				if (!g_regulator_enabled) {
+					SetServoAngle(SERVO_CENTER);
+				}
 			}
 
 			cmd_received = 0;
@@ -911,21 +924,64 @@ void StartControlTask(void const * argument)
 		// Filtracja Medianowa (usuwanie szpilek z surowego odczytu)
 		float dist_median = MedianFilter_Apply(&median_filter, (float) distance);
 
-		// Filtracja Skoków (Spike Filter) - całkowicie odrzuca skoki > 25mm
-		if (loop_counter > 10) { // Allow startup
-			float jump = dist_median - prev_valid_dist;
-			if (jump < 0)
-				jump = -jump;
+		// --- HYBRYDOWY ŁAŃCUCH FILTRÓW (z projektu testowego) ---
+		// 1. Rate Limiter (Odsiewanie szpilek)
+		// 2. Adaptive EMA (Dynamiczne wygładzanie)
+		// 3. Deadband (Stabilizacja wyniku na końcu)
 
-			if (jump > 25.0f) {
-				// Całkowite odrzucenie szpilki - użyj poprzedniej wartości
-				dist_median = prev_valid_dist;
+		#define NOISE_THRESHOLD 2   // Ignoruj zmiany < 2mm (jitter)
+		#define MAX_JUMP 20         // Ignoruj zmiany > 20mm (błędy/szpilki)
+
+		static uint16_t last_valid_raw = 125;
+		static float filtered_ema = 125.0f;
+		static uint16_t final_output = 125;
+		static int invalid_count = 0;
+
+		int valid_update = 0; // Flaga czy mamy nową wartość do filtra
+
+		if (dist_median < 2000) {
+			int diff = (int)dist_median - (int)last_valid_raw;
+			if (diff < 0) diff = -diff; // abs
+
+			// 1. Rate Limiter
+			if (diff <= MAX_JUMP) {
+				last_valid_raw = (uint16_t)dist_median;
+				invalid_count = 0;
+				valid_update = 1;
 			} else {
-				prev_valid_dist = dist_median;
+				invalid_count++;
+				if (invalid_count > 5) { // Watchdog odblokowujący
+					last_valid_raw = (uint16_t)dist_median;
+					invalid_count = 0;
+					valid_update = 1;
+				}
 			}
-		} else {
-			prev_valid_dist = dist_median;
 		}
+
+		if (valid_update) {
+			// 2. Adaptive EMA
+			float raw_diff = (float)last_valid_raw - filtered_ema;
+			if (raw_diff < 0) raw_diff = -raw_diff;
+
+			float alpha;
+			if (raw_diff < 10.0f) alpha = 0.3f;      // Silne wygładzanie (stabilność)
+			else if (raw_diff > 20.0f) alpha = 0.8f;  // Szybka reakcja
+			else alpha = 0.15f + ((raw_diff - 10.0f) / 30.0f) * 0.65f; // Interpolacja
+
+			filtered_ema = (alpha * (float)last_valid_raw) + ((1.0f - alpha) * filtered_ema);
+
+			// 3. Deadband (na wyjściu EMA)
+			int out_diff = (int)filtered_ema - (int)final_output;
+			if (out_diff < 0) out_diff = -out_diff;
+
+			if (out_diff > NOISE_THRESHOLD) {
+				final_output = (uint16_t)filtered_ema;
+			}
+		}
+		// else: błąd sensora -> trzymamy starą wartość
+
+		// Nadpisz prev_valid_dist dla kompatybilności z resztą kodu
+		prev_valid_dist = (float)final_output;
 
 		if (!Calibration_IsReady()) {
 			// Keep sending status message every 2 seconds
@@ -957,15 +1013,31 @@ void StartControlTask(void const * argument)
 		}
 
 #if USE_CALIBRATION
-		float dist_calibrated = Calibration_Interpolate(dist_median);
+		float dist_calibrated = Calibration_Interpolate(prev_valid_dist);
 #else
-      float dist_calibrated = dist_median;
+      float dist_calibrated = prev_valid_dist;
 #endif
 
 		// Lekki filtr EMA (alpha=0.85)
 		float filtered_dist = EMA_Update(&dist_ema, dist_calibrated);
 
 		distance = (uint16_t) dist_calibrated;
+
+		// --- Sprawdzenie czy regulator jest włączony ---
+		if (!g_regulator_enabled) {
+			// Regulator wyłączony - serwo na środku, wysyłaj tylko dane diagnostyczne
+			char data_buffer[64];
+			int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:0;V:0;S:%d",
+					(int)distance, (int)g_setpoint, (int)SERVO_CENTER, (int)filtered_dist,
+					distanceStr.rangeStatus);
+			uint8_t out_crc = CalculateCRC8(data_buffer, len);
+			sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
+			HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10);
+			
+			HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
+			osDelay(PID_DT_MS);
+			continue; // Pomiń PID i sterowanie serwem
+		}
 
 		float current_error = g_setpoint - filtered_dist;
 		float pid_error = current_error;
