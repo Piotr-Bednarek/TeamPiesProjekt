@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
         self.control_panel.setpoint_update.connect(self.serial.send_setpoint)
         self.control_panel.calibration_update.connect(self.serial.send_calibration)
         self.control_panel.mode_update.connect(self.serial.send_control_mode)
-        self.control_panel.derivative_mode_update.connect(self.serial.send_derivative_mode)
+        self.control_panel.pid_mode_update.connect(self.serial.send_pid_mode)
         
         # Connection Tile Interactions
         self.btn_refresh.clicked.connect(self.serial.list_ports)

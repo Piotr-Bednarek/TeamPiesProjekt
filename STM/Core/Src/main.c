@@ -31,6 +31,7 @@
 #include "filters.h"
 #include "calibration.h"
 #include "pid.h"
+#include "servo_pid.h"
 #include "crc8.h"
 #include "leds.h"
 
@@ -42,6 +43,9 @@
 // ServoPID_Controller przeniesiony do servo_pid.h
 
 /* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
 
 /* USER CODE END PD */
 
@@ -126,6 +130,12 @@ volatile uint8_t g_regulator_enabled = 1;
 PID_Controller_t g_pid_ctrl;
 volatile uint8_t g_pid_needs_reinit = 0;
 
+// Kontroler ServoPID (nasza implementacja) - domyślny
+ServoPID_Controller g_servo_pid;
+
+// Tryb PID: 0 = Custom (servo_pid, domyślny), 1 = CMSIS DSP
+volatile uint8_t g_pid_mode = 0;
+
 // Debugging
 volatile uint32_t g_adc_raw = 0;
 volatile float g_pot_setpoint = 0.0f;
@@ -185,6 +195,9 @@ void SetServoAngle(float angle) {
 		angle = 180.0f;
 
 	uint32_t pulse_length = (uint32_t) (500.0f + (angle / 180.0f) * 2000.0f);
+	
+
+	
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_length);
 }
 
@@ -252,7 +265,7 @@ int main(void)
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* definition and creation of ControlTask */
-  osThreadDef(ControlTask, StartControlTask, osPriorityHigh, 0, 512);
+  osThreadDef(ControlTask, StartControlTask, osPriorityHigh, 0, 1024);
   ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -721,8 +734,10 @@ void StartDefaultTask(void const * argument)
 				g_Kd = atof((char*) &rx_buffer[2]);
 				g_pid_needs_reinit = 1;
 			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
-				uint8_t mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				PID_SetMode(&g_pid_ctrl, mode);
+				// Przełączanie trybu regulatora: 0 = Custom (servo_pid), 1 = CMSIS DSP
+				g_pid_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
+				sprintf(msg, "PID MODE: %s\r\n", g_pid_mode == 0 ? "CUSTOM" : "CMSIS");
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 			}
 			// Komendy Kalibracji
 			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
@@ -854,13 +869,15 @@ void StartControlTask(void const * argument)
 
 	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
 	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
+
+	// Inicjalizacja kontrolera ServoPID (nasza implementacja) - domyślny
+	ServoPID_Init(&g_servo_pid);
 	
 	// Ustaw serwo na pozycję środkową przy starcie
 	SetServoAngle(SERVO_CENTER);
 
-	// Zmienne pomocnicze do walidacji odczytów
+	// Zmiennej pomocniczej prev_valid_dist
 	float prev_valid_dist = 145.0f;
-	int invalid_count = 0;
 
 	// Inicjalizacja bufora błędu
 	for(int i=0; i<AVG_ERR_SAMPLES; i++) err_buffer[i] = 0.0f;
@@ -929,8 +946,8 @@ void StartControlTask(void const * argument)
 		// 2. Adaptive EMA (Dynamiczne wygładzanie)
 		// 3. Deadband (Stabilizacja wyniku na końcu)
 
-		#define NOISE_THRESHOLD 2   // Ignoruj zmiany < 2mm (jitter)
-		#define MAX_JUMP 20         // Ignoruj zmiany > 20mm (błędy/szpilki)
+		#define NOISE_THRESHOLD 0.5   // Ignoruj zmiany < 2mm (jitter)
+		#define MAX_JUMP 30         // Ignoruj zmiany > 20mm (błędy/szpilki)
 
 		static uint16_t last_valid_raw = 125;
 		static float filtered_ema = 125.0f;
@@ -964,9 +981,9 @@ void StartControlTask(void const * argument)
 			if (raw_diff < 0) raw_diff = -raw_diff;
 
 			float alpha;
-			if (raw_diff < 10.0f) alpha = 0.3f;      // Silne wygładzanie (stabilność)
+			if (raw_diff < 10.0f) alpha = 0.5f;      // Silne wygładzanie (stabilność)
 			else if (raw_diff > 20.0f) alpha = 0.8f;  // Szybka reakcja
-			else alpha = 0.15f + ((raw_diff - 10.0f) / 30.0f) * 0.65f; // Interpolacja
+			else alpha = 0.15f + ((raw_diff - 5.0f) / 15.0f) * 0.65f; // Interpolacja
 
 			filtered_ema = (alpha * (float)last_valid_raw) + ((1.0f - alpha) * filtered_ema);
 
@@ -1000,7 +1017,7 @@ void StartControlTask(void const * argument)
 				cal_throttle = 0;
 
 				char cal_buffer[64];
-				int cal_len = sprintf(cal_buffer, "D:%d;A:0;F:%d;E:0;S:%d", (int) dist_median, (int) dist_median,
+				int cal_len = sprintf(cal_buffer, "D:%d;A:0;F:%d;E:0;S:%d", (int) dist_median, (int) final_output,
 						distanceStr.rangeStatus);
 				uint8_t cal_crc = CalculateCRC8(cal_buffer, cal_len);
 				sprintf(msg, "%s;C:%02X\r\n", cal_buffer, cal_crc);
@@ -1013,14 +1030,19 @@ void StartControlTask(void const * argument)
 		}
 
 #if USE_CALIBRATION
+		// D: = surowy odczyt po kalibracji (przed filtrem Adaptive EMA)
+		float raw_calibrated = Calibration_Interpolate((float)distance);
+		// F: = po Adaptive EMA i po kalibracji
 		float dist_calibrated = Calibration_Interpolate(prev_valid_dist);
 #else
-      float dist_calibrated = prev_valid_dist;
+		float raw_calibrated = (float)distance;
+		float dist_calibrated = prev_valid_dist;
 #endif
 
-		// Lekki filtr EMA (alpha=0.85)
-		float filtered_dist = EMA_Update(&dist_ema, dist_calibrated);
+		// filtered_dist = po filtrze i kalibracji
+		float filtered_dist = dist_calibrated;
 
+		uint16_t raw_distance = (uint16_t)raw_calibrated;  // D: surowy po kalibracji
 		distance = (uint16_t) dist_calibrated;
 
 		// --- Sprawdzenie czy regulator jest włączony ---
@@ -1028,7 +1050,7 @@ void StartControlTask(void const * argument)
 			// Regulator wyłączony - serwo na środku, wysyłaj tylko dane diagnostyczne
 			char data_buffer[64];
 			int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:0;V:0;S:%d",
-					(int)distance, (int)g_setpoint, (int)SERVO_CENTER, (int)filtered_dist,
+					(int)raw_distance, (int)g_setpoint, (int)SERVO_CENTER, (int)filtered_dist,
 					distanceStr.rangeStatus);
 			uint8_t out_crc = CalculateCRC8(data_buffer, len);
 			sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
@@ -1059,8 +1081,17 @@ void StartControlTask(void const * argument)
 			pid_error = 0.0f;
 		}
 
-		float pid_output = PID_Compute(&g_pid_ctrl, g_setpoint, filtered_dist);
-		float pid_angle = pid_output;  // CMSIS PID już zwraca wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
+		// Warunkowe obliczenie PID - wybór implementacji
+		float pid_output;
+		if (g_pid_mode == 0) {
+			// Custom PID (servo_pid.c) - domyślny
+			float error = g_setpoint - filtered_dist;
+			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
+		} else {
+			// CMSIS DSP PID
+			pid_output = PID_Compute(&g_pid_ctrl, g_setpoint, filtered_dist);
+		}
+		float pid_angle = pid_output;  // Wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
 		g_current_error = current_error; // Przekaż błąd do defaultTask (wizualizacja LED)
 		// UpdateErrorLEDs_5LED przeniesione do StartDefaultTask
 		
@@ -1082,15 +1113,7 @@ void StartControlTask(void const * argument)
 			pid_angle += feedforward;
 		}
 
-		static float prev_servo_angle = SERVO_CENTER;
-		float max_angle_change = 180.0f;
-
-		float angle_diff = pid_angle - prev_servo_angle;
-		if (angle_diff > max_angle_change) {
-			pid_angle = prev_servo_angle + max_angle_change;
-		} else if (angle_diff < -max_angle_change) {
-			pid_angle = prev_servo_angle - max_angle_change;
-		}
+		// Rate limiter usunięty - saturacja wystarczy jako zabezpieczenie
 
 		// Zabezpieczenie przed NaN (Not a Number)
 		if (isnan(pid_angle) || isinf(pid_angle)) {
@@ -1099,30 +1122,16 @@ void StartControlTask(void const * argument)
 
 		if (pid_angle < SERVO_MIN_LIMIT)
 			pid_angle = SERVO_MIN_LIMIT;
-		else if (pid_angle > SERVO_MAX_LIMIT) // Użyj else if dla optymalizacji
+		else if (pid_angle > SERVO_MAX_LIMIT)
 			pid_angle = SERVO_MAX_LIMIT;
 
-		prev_servo_angle = pid_angle;
-
-		static float ema_servo_angle = SERVO_CENTER;
-		float alpha_servo = 0.55f;
-		ema_servo_angle = alpha_servo * pid_angle + (1.0f - alpha_servo) * ema_servo_angle;
-		float smoothed_angle = ema_servo_angle;
-
-		static float last_sent_angle = SERVO_CENTER;
-		float angle_change =
-				(smoothed_angle > last_sent_angle) ?
-						(smoothed_angle - last_sent_angle) : (last_sent_angle - smoothed_angle);
-
-		if (angle_change >= SERVO_ANGLE_DEADBAND) {
-			// Significant change - update servo
-			SetServoAngle(smoothed_angle);
-			last_sent_angle = smoothed_angle;
-		}
+		// Bezpośrednie sterowanie serwem (bez dodatkowego wygładzania i deadband)
+		volatile float smoothed_angle = pid_angle;
+		SetServoAngle(smoothed_angle);
 
 		char data_buffer[64];
-		// D:Dist; A:Angle; F:Filtered; E:Error; V:AvgError; S:Status; Z:Setpoint
-		int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:%d;V:%d;S:%d", distance, (int)g_setpoint, (int) smoothed_angle, (int) filtered_dist,
+		// D:Dist (raw); A:Angle; F:Filtered; E:Error; V:AvgError; S:Status; Z:Setpoint
+		int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:%d;V:%d;S:%d", (int)raw_distance, (int)g_setpoint, (int) smoothed_angle, (int) filtered_dist,
 				(int) current_error, (int) avg_error, distanceStr.rangeStatus);
 
 		uint8_t out_crc = CalculateCRC8(data_buffer, len);

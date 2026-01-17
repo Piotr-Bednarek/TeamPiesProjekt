@@ -77,7 +77,7 @@ class ControlPanel(QWidget):
     setpoint_update = Signal(float)
     calibration_update = Signal(int, float, float) # index, raw, target
     mode_update = Signal(int) # 0=GUI, 1=Analog
-    derivative_mode_update = Signal(int) # 0=Standard, 1=Measurement
+    pid_mode_update = Signal(int) # 0=Custom, 1=CMSIS
     
     def __init__(self):
         super().__init__()
@@ -188,15 +188,15 @@ class ControlPanel(QWidget):
         
         # Mode buttons (Visual only functionality for now, logic is same)
         mode_layout = QHBoxLayout()
-        self.btn_pid = QPushButton("Pid CMSIS")
+        self.btn_pid = QPushButton("Custom PID")
         self.btn_pid.setCheckable(True)
         self.btn_pid.setChecked(True)
         self.btn_pid.setFixedSize(80, 20)
         self.btn_pid.setStyleSheet("font-size: 10px; padding:0;")
         
-        self.btn_lqr = QPushButton("Pochodna z pomiaru")
+        self.btn_lqr = QPushButton("CMSIS DSP")
         self.btn_lqr.setCheckable(True)
-        self.btn_lqr.setFixedSize(110, 20)
+        self.btn_lqr.setFixedSize(80, 20)
         self.btn_lqr.setStyleSheet("font-size: 10px; padding:0;")
         
         bg = QButtonGroup(self)
@@ -295,7 +295,7 @@ class ControlPanel(QWidget):
         self.kd_update.emit(val)
 
     def _on_mode_change(self, btn_id):
-        self.derivative_mode_update.emit(btn_id)
+        self.pid_mode_update.emit(btn_id)
     
     # --- Preset Management Methods ---
     def _load_presets(self):

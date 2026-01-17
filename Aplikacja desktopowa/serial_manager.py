@@ -161,8 +161,8 @@ class SerialManager(QObject):
         # mode: 0 = GUI, 1 = Analog
         self.send_command(f"M:{mode}")
 
-    def send_derivative_mode(self, mode):
-        # mode: 0 = Standard (CMSIS PID), 1 = Derivative on Measurement (Kick-Free)
+    def send_pid_mode(self, mode):
+        # mode: 0 = Custom PID (servo_pid), 1 = CMSIS DSP PID
         self.send_command(f"X:{mode}")
 
     def send_regulator_state(self, state):

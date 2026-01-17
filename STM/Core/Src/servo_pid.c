@@ -74,21 +74,26 @@ float ServoPID_Compute(ServoPID_Controller *pid, float error, float measurement)
 		saturated = -1; // Nasycenie dolne
 	}
 
-	float integration_contribution = error * pid->Ki;
-
+	// Anti-Windup (Clamping z decay)
 	if (saturated == 0) {
+		// Nie nasycone - normalna akumulacja
 		pid->integral += error;
-	} else if (saturated == 1 && integration_contribution < 0) {
+	} else if (saturated == 1 && error < 0) {
+		// Nasycenie górne, ale error ciągnie w dół - pozwól akumulować (odwijanie)
 		pid->integral += error;
-	} else if (saturated == -1 && integration_contribution > 0) {
+	} else if (saturated == -1 && error > 0) {
+		// Nasycenie dolne, ale error ciągnie w górę - pozwól akumulować (odwijanie)
 		pid->integral += error;
+	} else {
+		// Nasycone i error pogłębia nasycenie - decay całki zamiast akumulacji
+		pid->integral *= 0.9f;  // Bardzo szybki decay
 	}
 
-	// Twardy limit całki
-	if (pid->integral > 3000.0f)
-		pid->integral = 3000.0f;
-	if (pid->integral < -3000.0f)
-		pid->integral = -3000.0f;
+	// Twardy limit całki (bardzo mały dla uniknięcia blokowania)
+	if (pid->integral > 100.0f)
+		pid->integral = 100.0f;
+	if (pid->integral < -100.0f)
+		pid->integral = -100.0f;
 
 	// 4. Finalne wyjście
 	float new_I = pid->Ki * pid->integral;
