@@ -1,14 +1,35 @@
-\documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
+\documentclass[11pt]{article}
+
+\pdfobjcompresslevel=3    % compress PDF objects
+\pdfcompresslevel=9       % compress streams more (0..9)
+\pdfminorversion=4
+
+\usepackage[utf8]{inputenc} % remove if using XeLaTeX or LuaLaTeX
 \usepackage[T1]{fontenc}
-\usepackage[polish]{babel}
-\usepackage{geometry}
+\usepackage{polski}[babel]
+
+% Layout & graphics
+\usepackage[a4paper, total={7.5in, 9in}]{geometry}
+\usepackage{graphicx}
+\usepackage{wrapfig}              % images
+\usepackage[dvipsnames,table]{xcolor} % single xcolor invocation (keeps table option)
+
+% Math & symbols
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{gensymb}
+
+% Typography & layout helpers
+\usepackage{microtype}
+\usepackage{float}                 % [H] placement
+\usepackage{caption}
+\usepackage{subcaption}            % modern subfigure support (do NOT load subfig)
+\usepackage{multirow}
+\usepackage{titlesec}
+
+\usepackage{lmodern}
 \usepackage{listings}
 \usepackage{xcolor}
-\usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{fancyhdr}
-\usepackage{titlesec}
 
 \geometry{margin=2.5cm}
 
@@ -18,6 +39,8 @@
 \definecolor{codepurple}{rgb}{0.58,0,0.82}
 \definecolor{backcolour}{rgb}{0.95,0.95,0.92}
 \definecolor{codeblue}{rgb}{0,0,0.7}
+
+\definecolor{xppblue}{RGB}{37, 150, 190}
 
 % Styl dla kodu C
 \lstdefinestyle{cstyle}{
@@ -71,16 +94,46 @@
 
 \lstset{style=cstyle}
 
-\title{\textbf{System sterowania Ball on Beam}\\[0.5cm]
-\large Raport z projektu zaliczeniowego}
-\author{Piotr Bednarek, Jan Andrzejewski, Mateusz Banaszak}
-\date{Styczen 2026}
-
 \begin{document}
 
-\maketitle
+\begin
+{table}[H]
+\centering
+\begin
+{tabular}{|p{4cm}|p{8cm}|p{2cm}|}
+\hline
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Politechnika Poznańska}}  & \multicolumn{1}{c|}{\multirow{3}{*}{\resizebox{14mm}{!}{\includegraphics{img/logo2.eps}}}}\\ 
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Wydział Automatyki, Robotyki i Elektrotechniki}} & \\ 
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Instytut Robotyki i Inteligencji Maszynowej}} & \\ 
+\hline 
+\multicolumn{1}{|c|}{AiR Sem 5} & \multicolumn{1}{c|}{Systemy mikroprocesorowe} & \multicolumn{1}{c|}{2025/26 (s.zim.)} \\
+\hline
+ Jan Andrzejewski \par Matuesz Banaszak \par Piotr Bednarek & \textbf{Raport z projektu zaliczeniowego} \par Balansująca piłka na pochylni & Data wyk.:\par 13.10.20\\
+\hline
+Grupa środa 13:30  & &  \\
+\hline
+\end{tabular}
+\end{table}	
+
 \tableofcontents
 \newpage
+
+\section{Wprowadzenie}
+
+TODO tutaj jakis tekst opis celu projektu i jakies innne pierdoly
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/stanowisko.png}
+    \caption{Stanowisko}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/desktop.png}
+    \caption{Aplikacja desktopowa}
+\end{figure}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Wymagania projektowe}
@@ -329,7 +382,15 @@ void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd,
 \subsection{Wykorzystanie systemu kontroli wersji}
 %------------------------------------------------------------------------------
 
-Projekt wykorzystuje system kontroli wersji Git. Repozytorium znajduje sie w katalogu glownym projektu (\texttt{.git/}).
+Projekt wykorzystuje system kontroli wersji Git. Repozytorium znajduje sie w katalogu glownym projektu (\texttt{.git/}). 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{img/repogithub.png}
+    \caption{}
+\end{figure}
+
+
 
 %------------------------------------------------------------------------------
 \subsection{Dedykowana aplikacja desktopowa (GUI)}
@@ -446,6 +507,12 @@ System posiada 5 diod LED (PE2--PE6) wizualizujacych aktualny uchyb regulacji:
 #define LED_ERR_4_Pin     GPIO_PIN_5
 #define LED_ERR_5_Pin     GPIO_PIN_6
 \end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    %\includegraphics[width=0.7\linewidth]{img/}
+    \caption{}
+\end{figure}
 
 %------------------------------------------------------------------------------
 \subsection{Dodatkowe urzadzenie wejscia -- potencjometr}
