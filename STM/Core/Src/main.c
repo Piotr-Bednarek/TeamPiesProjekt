@@ -741,7 +741,12 @@ void StartDefaultTask(void const * argument)
 			}
 			// Komendy Kalibracji
 			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
-			else if (strncmp((char*)rx_buffer, "CAL:RESET", 9) == 0) {\n\t\t\t\tCalibration_Init();\n\t\t\t\tsprintf(msg, "[CAL] RESET DONE. Waiting for points...\\r\\n");\n\t\t\t\tHAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);\n\t\t\t}\n\t\t\telse if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
+			else if (strncmp((char*)rx_buffer, "CAL:RESET", 9) == 0) {
+				Calibration_Init();
+				sprintf(msg, "[CAL] RESET DONE. Waiting for points...\r\n");
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+			}
+			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
 				int cal_idx = rx_buffer[3] - '0'; // Indeks punktu
 				if (cal_idx >= 0 && cal_idx < 5) {
 					char *comma = strchr((char*) &rx_buffer[5], ',');
@@ -878,6 +883,7 @@ void StartControlTask(void const * argument)
 
 	// Zmiennej pomocniczej prev_valid_dist
 	float prev_valid_dist = 145.0f;
+	static float last_servo_angle = SERVO_CENTER;
 
 	// Inicjalizacja bufora błędu
 	for(int i=0; i<AVG_ERR_SAMPLES; i++) err_buffer[i] = 0.0f;
@@ -1047,6 +1053,7 @@ void StartControlTask(void const * argument)
 
 		// --- Sprawdzenie czy regulator jest włączony ---
 		if (!g_regulator_enabled) {
+			last_servo_angle = SERVO_CENTER;
 			// Regulator wyłączony - serwo na środku, wysyłaj tylko dane diagnostyczne
 			char data_buffer[64];
 			int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:0;V:0;S:%d",
@@ -1124,6 +1131,12 @@ void StartControlTask(void const * argument)
 			pid_angle = SERVO_MIN_LIMIT;
 		else if (pid_angle > SERVO_MAX_LIMIT)
 			pid_angle = SERVO_MAX_LIMIT;
+
+		// Slew Rate Limiter (6 degrees per loop)
+		float diff = pid_angle - last_servo_angle;
+		if (diff > 6.0f) pid_angle = last_servo_angle + 6.0f;
+		else if (diff < -6.0f) pid_angle = last_servo_angle - 6.0f;
+		last_servo_angle = pid_angle;
 
 		// Bezpośrednie sterowanie serwem (bez dodatkowego wygładzania i deadband)
 		volatile float smoothed_angle = pid_angle;
