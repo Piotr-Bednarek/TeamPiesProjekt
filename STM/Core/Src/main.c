@@ -741,7 +741,7 @@ void StartDefaultTask(void const * argument)
 			}
 			// Komendy Kalibracji
 			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
-			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
+			else if (strncmp((char*)rx_buffer, "CAL:RESET", 9) == 0) {\n\t\t\t\tCalibration_Init();\n\t\t\t\tsprintf(msg, "[CAL] RESET DONE. Waiting for points...\\r\\n");\n\t\t\t\tHAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);\n\t\t\t}\n\t\t\telse if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
 				int cal_idx = rx_buffer[3] - '0'; // Indeks punktu
 				if (cal_idx >= 0 && cal_idx < 5) {
 					char *comma = strchr((char*) &rx_buffer[5], ',');
@@ -1137,7 +1137,11 @@ void StartControlTask(void const * argument)
 		uint8_t out_crc = CalculateCRC8(data_buffer, len);
 
 		sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
-		HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10); // Timeout 10ms
+		static uint8_t u_throttle = 0;
+		if (++u_throttle >= 2) {
+			u_throttle = 0;
+			HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10); // Timeout 10ms
+		}
 
 		osDelay(PID_DT_MS); // Loop delay
 	}
