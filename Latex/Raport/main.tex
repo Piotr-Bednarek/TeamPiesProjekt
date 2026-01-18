@@ -108,7 +108,7 @@
 \hline
 \multicolumn{1}{|c|}{AiR Sem 5} & \multicolumn{1}{c|}{Systemy mikroprocesorowe} & \multicolumn{1}{c|}{2025/26 (s.zim.)} \\
 \hline
-Jan Andrzejewski \par Matuesz Banaszak \par Piotr Bednarek & \textbf{Raport z projektu zaliczeniowego} \par Balansująca piłka na pochylni & Data wyk.:\par 13.10.20\\
+Jan Andrzejewski \par Mateusz Banaszak \par Piotr Bednarek & \textbf{Raport z projektu zaliczeniowego} \par Ball on Beam & Data wyk.:\par 18.01.2026\\
 \hline
 Grupa środa 13:30  & &  \\
 \hline
@@ -119,35 +119,49 @@ Grupa środa 13:30  & &  \\
 \newpage
 
 \section{Wprowadzenie}
+\subsection{Zakres i cel projektu}
 
-TODO tutaj jakis tekst opis celu projektu i jakies innne pierdoly
+Za cel projektu obrano zbudowanie stanowiska służacego do sterowania obiektem dynamiczym "Ball on beam". Za cel przy implementacji zostało przyjęte spełnienie dodatkowych wymogów projektowych opisanych w następnym rozdziale. 
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\linewidth]{img/stanowisko.png}
+    \includegraphics[width=0.8\linewidth]{img/stanowisko.png}
     \caption{Stanowisko}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\linewidth]{img/desktop.png}
+    \includegraphics[width=0.9\linewidth]{img/desktop.png}
     \caption{Aplikacja desktopowa}
 \end{figure}
+
+\subsection{Wykorzystane elementy}
+
+\begin{itemize}
+    \item STM Nucleo F767ZI
+    \item Servo TowerPro MG946R
+    \item Grove - VL53LOX Timeof Flight I2C
+    \item Diody LED - 1x zielona, 2x czerwona, 2x żółta 
+    \item 5x tranzystory npn pn2222
+    \item 5x rezystory 2k$\Omega$
+    \item Potencjometr 
+    \item Zasilacz 5 V
+\end{itemize}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Wymagania projektowe}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Ponizej przedstawiono wymagania projektowe wraz z fragmentami kodu zrodlowego, ktore potwierdzaja ich spelnienie.
+Poniżej przedstawiono wymagania projektowe, które spełnia projekt, wraz z fragmentami kodu dokumentującymi ich implementację.
 
 %------------------------------------------------------------------------------
-\subsection{Pomiar zmiennej regulowanej ze stalym okresem probkowania}
+\subsection{Pomiar zmiennej regulowanej ze stałym okresem próbkowania}
 %------------------------------------------------------------------------------
 
-System dokonuje pomiaru regulowanej zmiennej (pozycji kulki) ze stalym okresem probkowania zdefiniowanym jako \texttt{PID\_DT\_MS = 30ms}. Zapewnia to funkcja \texttt{osDelay()} systemu FreeRTOS wywolana na koncu petli sterowania.
+System dokonuje pomiaru regulowanej zmiennej (pozycji kulki) ze stałym okresem próbkowania zdefiniowanym jako \texttt{PID\_DT\_MS = 30ms}. Zapewnia to funkcja \texttt{osDelay()} systemu FreeRTOS wywołana na końcu pętli sterowania.
 
-\begin{lstlisting}[caption={Staly okres probkowania (main.h)}, style=cstyle]
+\begin{lstlisting}[caption={Stały okres próbkowania (main.h)}, style=cstyle]
 // --- Global System Settings ---
 #define PID_DT_MS          30
 #define SETPOINT_DEFAULT   125.0f
@@ -155,7 +169,7 @@ System dokonuje pomiaru regulowanej zmiennej (pozycji kulki) ze stalym okresem p
 #define AVG_ERR_SAMPLES    35
 \end{lstlisting}
 
-\begin{lstlisting}[caption={Implementacja stalego okresu w petli sterowania (main.c)}, style=cstyle]
+\begin{lstlisting}[caption={Implementacja stałego okresu w pętli sterowania (main.c)}, style=cstyle]
 /* Infinite loop */
 for (;;) {
     loop_counter++;
@@ -175,9 +189,9 @@ for (;;) {
 \subsection{Sterowanie w bezpiecznym zakresie zmian regulowanej zmiennej}
 %------------------------------------------------------------------------------
 
-System zapewnia bezpieczne sterowanie poprzez zdefiniowanie twardych limitow kata serwa w pliku \texttt{main.h} oraz ich egzekwowanie w kodzie sterowania.
+System zapewnia bezpieczne sterowanie poprzez zdefiniowanie twardych limitów kąta serwa w pliku \texttt{main.h} oraz ich egzekwowanie w kodzie sterowania.
 
-\begin{lstlisting}[caption={Definicje limitow bezpieczenstwa serwa (main.h)}, style=cstyle]
+\begin{lstlisting}[caption={Definicje limitów bezpieczeństwa serwa (main.h)}, style=cstyle]
 // --- Servo Configuration ---
 #define SERVO_CENTER       100.0f
 #define SERVO_MIN_LIMIT    60.0f
@@ -185,7 +199,7 @@ System zapewnia bezpieczne sterowanie poprzez zdefiniowanie twardych limitow kat
 #define SERVO_ANGLE_DEADBAND 0.8f
 \end{lstlisting}
 
-\begin{lstlisting}[caption={Saturacja wyjscia PID (main.c)}, style=cstyle]
+\begin{lstlisting}[caption={Saturacja wyjścia PID (main.c)}, style=cstyle]
 // Zabezpieczenie przed NaN (Not a Number)
 if (isnan(pid_angle) || isinf(pid_angle)) {
     pid_angle = SERVO_CENTER;
@@ -201,25 +215,41 @@ volatile float smoothed_angle = pid_angle;
 SetServoAngle(smoothed_angle);
 \end{lstlisting}
 
+\newpage
+
 %------------------------------------------------------------------------------
 \subsection{Uchyb ustalony na poziomie 5\% (i 1\%) zakresu regulacji}
 %------------------------------------------------------------------------------
 
-System oblicza sredni blad (rolling average) z ostatnich 35 probek, co pozwala na monitorowanie uchybu ustalonego. Zakres regulacji wynosi 250mm, wiec 5\% = 12.5mm, a 1\% = 2.5mm.
+System oblicza średni błąd (rolling average) z ostatnich 35 próbek, co pozwala na monitorowanie uchybu ustalonego. Zakres regulacji wynosi 250 mm, więc 5\% = 12,5 mm, a 1\% = 2,5 mm.
 
-Wartosc sredniego uchybu jest przesylana przez UART i wyswietlana w czasie rzeczywistym w aplikacji desktopowej na panelu metryk oraz na wykresie. Umozliwia to biezaca ocene jakosci regulacji bez koniecznosci analizy surowych danych.
+Wartość średniego uchybu jest przesyłana przez UART i wyświetlana w czasie rzeczywistym w aplikacji desktopowej na panelu metryk oraz na wykresie. Umożliwia to bieżącą ocenę jakości regulacji bez konieczności analizy surowych danych.
+
+\begin{lstlisting}[caption={Obliczenie uchybu z 35 (main.c)}, style=cstyle]
+// --- Obliczanie Średniego Błędu (Rolling Average) ---
+		float current_abs_err = (current_error < 0) ? -current_error : current_error;
+		
+		err_sum -= err_buffer[err_idx];       // Odejmij najstarszą próbkę
+		err_buffer[err_idx] = current_abs_err; // Zapisz nową
+		err_sum += current_abs_err;           // Dodaj nową próbkę
+		
+		err_idx++;
+		if(err_idx >= AVG_ERR_SAMPLES) err_idx = 0;
+		
+		float avg_error = err_sum / AVG_ERR_SAMPLES;
+\end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Zadawanie wartosci referencyjnej za pomoca komunikacji szeregowej lub urzadzenia wejscia}
+\subsection{Zadawanie wartości referencyjnej za pomocą komunikacji szeregowej lub urządzenia wejścia}
 %------------------------------------------------------------------------------
 
-Wartosc referencyjna moze byc zadawana na dwa sposoby:
+Wartość referencyjna może być zadawana na dwa sposoby:
 \begin{itemize}
-    \item Przez komunikacje szeregowa UART (komenda \texttt{S:wartosc})
-    \item Przez potencjometr podlaczony do wejscia ADC (PA0)
+    \item Przez komunikację szeregową UART (komenda \texttt{S:wartosc})
+    \item Przez potencjometr podłączony do wejścia ADC (PA0)
 \end{itemize}
 
-\begin{lstlisting}[caption={Obsluga komendy setpointu przez UART (main.c)}, style=cstyle]
+\begin{lstlisting}[caption={Obsługa komendy setpointu przez UART (main.c)}, style=cstyle]
 void StartDefaultTask(void const * argument) {
     for (;;) {
         // Obsluga komend UART
@@ -247,7 +277,7 @@ if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
     float pot_setpoint = (float)g_adc_raw * 0.070818f; 
     g_pot_setpoint = pot_setpoint; 
     
-    // Jesli tryb Analog, nadpisz setpoint
+    // Jeśli tryb Analog, nadpisz setpoint
     if (control_mode == 1) {
         // Lekki filtr na setpoint z potencjometru
         static float pot_ema = 0.0f;
@@ -260,12 +290,12 @@ HAL_ADC_Stop(&hadc1);
 \end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Podglad sygnalow przez komunikacje szeregowa}
+\subsection{Podgląd sygnałów przez komunikację szeregową}
 %------------------------------------------------------------------------------
 
-System wysyla dane pomiarowe przez UART w formacie tekstowym z suma kontrolna CRC-8. Dane zawieraja: dystans surowy (D), setpoint (Z), kat serwa (A), dystans filtrowany (F), blad (E), sredni blad (V) oraz status sensora (S).
+System wysyła dane pomiarowe przez UART w formacie tekstowym z sumą kontrolną CRC-8. Dane zawierają: dystans surowy (D), setpoint (Z), kąt serwa (A), dystans filtrowany (F), błąd (E), średni błąd (V) oraz status sensora (S).
 
-\begin{lstlisting}[caption={Wysylanie danych przez UART z CRC (main.c)}, style=cstyle]
+\begin{lstlisting}[caption={Wysyłanie danych przez UART z CRC (main.c)}, style=cstyle]
 char data_buffer[64];
 // D:Dist (raw); A:Angle; F:Filtered; E:Error; V:AvgError; S:Status; Z:Setpoint
 int len = sprintf(data_buffer, "D:%d;Z:%d;A:%d;F:%d;E:%d;V:%d;S:%d", 
@@ -284,23 +314,23 @@ if (++u_throttle >= 2) {
 \end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Podzial kodu na moduly i dokumentacja Doxygen}
+\subsection{Podział kodu na moduły i dokumentacja Doxygen}
 %------------------------------------------------------------------------------
 
-Kod zrodlowy jest podzielony na osobne moduly o jasno zdefiniowanych funkcjonalnosciach. Kazdy modul posiada dokumentacje zgodna ze standardem Doxygen.
+Kod źródłowy jest podzielony na osobne moduły o jasno zdefiniowanych funkcjonalnościach. Każdy moduł posiada dokumentację zgodną ze standardem Doxygen.
 
-\textbf{Struktura modulow STM32:}
+\textbf{Struktura modułów STM32:}
 \begin{itemize}
-    \item \texttt{main.c/h} -- glowna aplikacja, konfiguracja peryferiow
+    \item \texttt{main.c/h} -- główna aplikacja, konfiguracja peryferiów
     \item \texttt{pid.c/h} -- wrapper na CMSIS DSP PID
-    \item \texttt{servo\_pid.c/h} -- wlasna implementacja PID z Anti-Windup
+    \item \texttt{servo\_pid.c/h} -- własna implementacja PID z Anti-Windup
     \item \texttt{filters.c/h} -- filtry cyfrowe (Mediana, EMA, 1-Euro)
     \item \texttt{crc8.c/h} -- obliczanie sumy kontrolnej CRC-8
-    \item \texttt{leds.c/h} -- wizualizacja bledu na LEDach
+    \item \texttt{leds.c/h} -- wizualizacja błędu na LEDach
     \item \texttt{calibration.c/h} -- kalibracja sensora
 \end{itemize}
 
-\begin{lstlisting}[caption={Przyklad dokumentacji Doxygen (pid.c)}, style=cstyle]
+\begin{lstlisting}[caption={Przykład dokumentacji Doxygen (pid.c)}, style=cstyle]
 /**
  ******************************************************************************
  * @file    pid.c
@@ -336,28 +366,21 @@ void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd,
 
 Projekt wykorzystuje system kontroli wersji Git. Repozytorium znajduje sie w katalogu glownym projektu (\texttt{.git/}).
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.7\linewidth]{img/repogithub.png}
-    \caption{}
-\end{figure}
-
-
-
 %------------------------------------------------------------------------------
 \subsection{Dedykowana aplikacja desktopowa (GUI)}
 %------------------------------------------------------------------------------
 
-Aplikacja desktopowa zostala napisana w jezyku Python z wykorzystaniem frameworka PySide6 (Qt). Umozliwia ona:
+Aplikacja desktopowa została napisana w języku Python z wykorzystaniem frameworka PySide6 (Qt). Umożliwia ona:
 \begin{itemize}
-    \item Polaczenie z mikrokontrollerem przez port szeregowy
-    \item Wizualizacje sygnalow w czasie rzeczywistym (wykresy PyQtGraph)
-    \item Zadawanie wartosci referencyjnej i parametrow PID
-    \item Nagrywanie i eksport danych do CSV
+    \item Połączenie z mikrokontrolerem przez port szeregowy
+    \item Wizualizację sygnałów w czasie rzeczywistym (wykresy PyQtGraph)
+    \item Wybór trybu (UI, sinus, śledzenie trajektorii) i zadawanie sygnału referencyjnego 
+    \item Zadawanie wartości parametrów PID
+    \item Nagrywanie i eksport sygnałów do CSV
     \item Sterowanie trybem pracy regulatora (Start/Stop)
 \end{itemize}
 
-\begin{lstlisting}[caption={Glowna klasa aplikacji GUI (app.py)}, style=pythonstyle]
+\begin{lstlisting}[caption={Główna klasa aplikacji GUI (app.py)}, style=pythonstyle]
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout
 from serial_manager import SerialManager
 from widgets.metrics_panel import MetricsPanel
@@ -408,10 +431,10 @@ class SerialManager(QObject):
 \end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Skrypty do logowania sygnalow}
+\subsection{Skrypty do logowania sygnałów}
 %------------------------------------------------------------------------------
 
-Aplikacja desktopowa posiada wbudowany mechanizm nagrywania danych pomiarowych do plikow CSV z mozliwoscia eksportu.
+Aplikacja desktopowa posiada wbudowany mechanizm nagrywania danych pomiarowych do plików CSV z możliwością eksportu.
 
 \begin{lstlisting}[caption={Funkcja zapisu nagrania do CSV (app.py)}, style=pythonstyle]
 def _save_recording(self):
@@ -440,27 +463,27 @@ def _save_recording(self):
 \end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Dodatkowe urzadzenie wyjscia -- wyswietlacz LED}
+\subsection{Dodatkowe urządzenie wyjścia -- wyświetlacz LED}
 %------------------------------------------------------------------------------
 
-System posiada 5 diod LED (PE2--PE6) wizualizujacych aktualny uchyb regulacji:
+System posiada 5 diod LED (PE2--PE6) wizualizujących aktualny uchyb regulacji:
 \begin{itemize}
-    \item LED zielona (PE4) -- blad w zakresie $\pm$1\% (2.5mm)
-    \item LEDy zolte (PE3, PE5) -- blad w zakresie $\pm$5\% (12.5mm)
-    \item LEDy czerwone (PE2, PE6) -- blad wiekszy niz 5\%
+    \item LED zielona (PE4) -- błąd w zakresie $\pm$1\% (2,5 mm)
+    \item LEDy żółte (PE3, PE5) -- błąd w zakresie $\pm$5\% (12,5 mm)
+    \item LEDy czerwone (PE2, PE6) -- błąd większy niż $\pm$5\%
 \end{itemize}
 
 \begin{lstlisting}[caption={Definicje pinow LED (main.h)}, style=cstyle]
 // --- LED Error Bar ---
 #define LED_ERR_PORT      GPIOE
-#define LED_ERR_1_Pin     GPIO_PIN_2
-#define LED_ERR_2_Pin     GPIO_PIN_3
-#define LED_ERR_3_Pin     GPIO_PIN_4
-#define LED_ERR_4_Pin     GPIO_PIN_5
-#define LED_ERR_5_Pin     GPIO_PIN_6
+#define LED_ERR_1_Pin     GPIO_PIN_2 //PE2
+#define LED_ERR_2_Pin     GPIO_PIN_3 //PE3
+#define LED_ERR_3_Pin     GPIO_PIN_4 //PE4
+#define LED_ERR_4_Pin     GPIO_PIN_5 //PE5
+#define LED_ERR_5_Pin     GPIO_PIN_6 //PE6
 \end{lstlisting}
 
-\begin{lstlisting}[caption={Update stanu ledów (leds.c)}, style=cstyle]
+\begin{lstlisting}[caption={Update stanu LED (leds.c)}, style=cstyle]
 void UpdateErrorLEDs_5LED(float error) {
 	// Wyłącz wszystkie LEDy (PE2..PE6)
 	HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | 
@@ -493,15 +516,15 @@ void UpdateErrorLEDs_5LED(float error) {
 
 \begin{figure}[H]
     \centering
-    %\includegraphics[width=0.7\linewidth]{img/}
-    \caption{}
+    \includegraphics[width=0.7\linewidth]{img/schematled.png}
+    \caption{Schemat połączenia LED}
 \end{figure}
 
 %------------------------------------------------------------------------------
-\subsection{Dodatkowe urzadzenie wejscia -- potencjometr}
+\subsection{Dodatkowe urządzenie wejścia -- potencjometr}
 %------------------------------------------------------------------------------
 
-System wykorzystuje potencjometr podlaczony do wejscia analogowego PA0 (ADC1\_CH0) do zadawania wartosci referencyjnej w trybie analogowym.
+System wykorzystuje potencjometr podłączony do wejścia analogowego PA0 (ADC1\_CH0) do zadawania wartości referencyjnej w trybie analogowym.
 
 \begin{lstlisting}[caption={Konfiguracja ADC dla potencjometru (main.c)}, style=cstyle]
 static void MX_ADC1_Init(void) {
@@ -522,10 +545,10 @@ static void MX_ADC1_Init(void) {
 \end{lstlisting}
 
 %------------------------------------------------------------------------------
-\subsection{Protokol komunikacji z suma kontrolna CRC-8}
+\subsection{Protokół komunikacji z sumą kontrolną CRC-8}
 %------------------------------------------------------------------------------
 
-Komunikacja szeregowa wykorzystuje sume kontrolna CRC-8 z wielomianem 0x07 dla zapewnienia integralnosci danych. Implementacja jest identyczna po stronie STM32 (C) i aplikacji desktopowej (Python).
+Komunikacja szeregowa wykorzystuje sumę kontrolną CRC-8 z wielomianem 0x07 dla zapewnienia integralności danych. Implementacja jest identyczna po stronie STM32 (C) i aplikacji desktopowej (Python).
 
 \begin{lstlisting}[caption={Implementacja CRC-8 (crc8.c)}, style=cstyle]
 /**
@@ -654,20 +677,20 @@ void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
 \section{Podsumowanie}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Projekt spelnia wszystkie wymagania funkcjonalne i dodatkowe:
+Projekt spełnia wszystkie wymagania funkcjonalne i dodatkowe:
 
 \begin{enumerate}
-    \item \textbf{Pomiar ze stalym okresem} -- \texttt{osDelay(PID\_DT\_MS)} zapewnia 30ms okres probkowania
+    \item \textbf{Pomiar ze stałym okresem} -- \texttt{osDelay(PID\_DT\_MS)} zapewnia 30 ms okres próbkowania
     \item \textbf{Bezpieczny zakres sterowania} -- limity serwa 60--140 stopni
-    \item \textbf{Uchyb ustalony} -- rolling average z 35 probek, wizualizacja na 5 LEDach (1\%/5\% progi)
-    \item \textbf{Zadawanie wartosci referencyjnej} -- UART (komenda S:) i potencjometr (ADC PA0)
-    \item \textbf{Podglad sygnalow} -- ramki UART z danymi D/Z/A/F/E/V/S + CRC-8
-    \item \textbf{Modularnosc i Doxygen} -- 7 modulow C, pelna dokumentacja API
+    \item \textbf{Uchyb ustalony} -- rolling average z 35 próbek, uchyb ustalony na poziomie <1\%
+    \item \textbf{Zadawanie wartości referencyjnej} -- UART (komenda S:) i potencjometr (ADC PA0)
+    \item \textbf{Podgląd sygnałów} -- ramki UART z danymi D/Z/A/F/E/V/S + CRC-8
+    \item \textbf{Modularność i Doxygen} -- 7 modułów C, pełna dokumentacja API
     \item \textbf{Kontrola wersji} -- repozytorium Git
     \item \textbf{Aplikacja desktopowa} -- PySide6 (Qt) z wykresami PyQtGraph
-    \item \textbf{Logowanie sygnalow} -- eksport do CSV z timestampami
-    \item \textbf{Urzadzenie wyjscia} -- 5 diod LED (PE2--PE6)
-    \item \textbf{Urzadzenie wejscia} -- potencjometr na ADC1\_CH0
+    \item \textbf{Logowanie sygnałów} -- eksport do CSV z timestampami
+    \item \textbf{Urządzenie wyjścia} -- 5 diod LED (PE2--PE6)
+    \item \textbf{Urządzenie wejścia} -- potencjometr na ADC1\_CH0
     \item \textbf{Suma kontrolna CRC-8} -- wielomian 0x07, zgodna implementacja STM32/Python
     \item \textbf{FreeRTOS} -- 2 taski (ControlTask, DefaultTask)
 \end{enumerate}
