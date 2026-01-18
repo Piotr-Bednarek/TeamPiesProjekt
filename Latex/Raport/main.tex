@@ -451,6 +451,16 @@ System posiada 5 diod LED (PE2--PE6) wizualizujacych aktualny uchyb regulacji:
 \end{itemize}
 
 \begin{lstlisting}[caption={Definicje pinow LED (main.h)}, style=cstyle]
+// --- LED Error Bar ---
+#define LED_ERR_PORT      GPIOE
+#define LED_ERR_1_Pin     GPIO_PIN_2
+#define LED_ERR_2_Pin     GPIO_PIN_3
+#define LED_ERR_3_Pin     GPIO_PIN_4
+#define LED_ERR_4_Pin     GPIO_PIN_5
+#define LED_ERR_5_Pin     GPIO_PIN_6
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Update stanu ledów (leds.c)}, style=cstyle]
 void UpdateErrorLEDs_5LED(float error) {
 	// Wyłącz wszystkie LEDy (PE2..PE6)
 	HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | 
