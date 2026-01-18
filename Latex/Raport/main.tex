@@ -102,18 +102,18 @@
 \begin
 {tabular}{|p{4cm}|p{8cm}|p{2cm}|}
 \hline
-\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Politechnika Poznańska}}  & \multicolumn{1}{c|}{\multirow{3}{*}{\resizebox{14mm}{!}{\includegraphics{img/logo2.eps}}}}\\ 
-\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Wydział Automatyki, Robotyki i Elektrotechniki}} & \\ 
-\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Instytut Robotyki i Inteligencji Maszynowej}} & \\ 
-\hline 
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Politechnika Poznańska}}  & \multicolumn{1}{c|}{\multirow{3}{*}{\resizebox{14mm}{!}{\includegraphics{img/logo2.eps}}}}\\
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Wydział Automatyki, Robotyki i Elektrotechniki}} & \\
+\multicolumn{2}{|c|}{\cellcolor{xppblue}\textcolor[rgb]{1,1,1}{Instytut Robotyki i Inteligencji Maszynowej}} & \\
+\hline
 \multicolumn{1}{|c|}{AiR Sem 5} & \multicolumn{1}{c|}{Systemy mikroprocesorowe} & \multicolumn{1}{c|}{2025/26 (s.zim.)} \\
 \hline
- Jan Andrzejewski \par Matuesz Banaszak \par Piotr Bednarek & \textbf{Raport z projektu zaliczeniowego} \par Balansująca piłka na pochylni & Data wyk.:\par 13.10.20\\
+Jan Andrzejewski \par Matuesz Banaszak \par Piotr Bednarek & \textbf{Raport z projektu zaliczeniowego} \par Balansująca piłka na pochylni & Data wyk.:\par 13.10.20\\
 \hline
 Grupa środa 13:30  & &  \\
 \hline
 \end{tabular}
-\end{table}	
+\end{table}
 
 \tableofcontents
 \newpage
@@ -205,57 +205,9 @@ SetServoAngle(smoothed_angle);
 \subsection{Uchyb ustalony na poziomie 5\% (i 1\%) zakresu regulacji}
 %------------------------------------------------------------------------------
 
-System oblicza sredni blad (rolling average) z ostatnich 35 probek, co pozwala na monitorowanie uchybu ustalonego. Zakres regulacji wynosi 250mm, wiec 5\% = 12.5mm, a 1\% = 2.5mm. Wizualizacja na LEDach wykorzystuje te progi.
+System oblicza sredni blad (rolling average) z ostatnich 35 probek, co pozwala na monitorowanie uchybu ustalonego. Zakres regulacji wynosi 250mm, wiec 5\% = 12.5mm, a 1\% = 2.5mm.
 
-\begin{lstlisting}[caption={Sredni uchyb (Rolling Average) - main.c}, style=cstyle]
-// Bufor sredniego uchybu
-float err_buffer[AVG_ERR_SAMPLES];
-uint8_t err_idx = 0;
-float err_sum = 0.0f;
-
-// --- Obliczanie Sredniego Bledu (Rolling Average) ---
-float current_abs_err = (current_error < 0) ? -current_error : current_error;
-
-err_sum -= err_buffer[err_idx];       // Odejmij najstarsza probke
-err_buffer[err_idx] = current_abs_err; // Zapisz nowa
-err_sum += current_abs_err;           // Dodaj nowa
-
-err_idx++;
-if(err_idx >= AVG_ERR_SAMPLES) err_idx = 0;
-
-float avg_error = err_sum / AVG_ERR_SAMPLES;
-\end{lstlisting}
-
-\begin{lstlisting}[caption={Wizualizacja uchybu na LEDach (leds.c)}, style=cstyle]
-void UpdateErrorLEDs_5LED(float error) {
-    // Wylacz wszystkie LEDy (PE2..PE6)
-    HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | 
-                             LED_ERR_4_Pin | LED_ERR_5_Pin, GPIO_PIN_RESET);
-    
-    // Progi: 
-    // 1% z 250mm = 2.5mm
-    // 5% z 250mm = 12.5mm
-    float limit_green = 2.5f;
-    float limit_yellow = 12.5f;
-    
-    if (error < -limit_yellow) {
-        // Duzy ujemny -> Czerwona (PE2 - LED_ERR_1)
-        HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin, GPIO_PIN_SET);
-    } else if (error < -limit_green) {
-        // Sredni ujemny -> Zolta (PE3 - LED_ERR_2)
-        HAL_GPIO_WritePin(GPIOE, LED_ERR_2_Pin, GPIO_PIN_SET);
-    } else if (error <= limit_green) { 
-        // Maly blad (+/- 2.5mm) -> Zielona (PE4 - LED_ERR_3)
-        HAL_GPIO_WritePin(GPIOE, LED_ERR_3_Pin, GPIO_PIN_SET);
-    } else if (error <= limit_yellow) {
-        // Sredni dodatni -> Zolta (PE5 - LED_ERR_4)
-        HAL_GPIO_WritePin(GPIOE, LED_ERR_4_Pin, GPIO_PIN_SET);
-    } else {
-        // Duzy dodatni -> Czerwona (PE6 - LED_ERR_5)
-        HAL_GPIO_WritePin(GPIOE, LED_ERR_5_Pin, GPIO_PIN_SET);
-    }
-}
-\end{lstlisting}
+Wartosc sredniego uchybu jest przesylana przez UART i wyswietlana w czasie rzeczywistym w aplikacji desktopowej na panelu metryk oraz na wykresie. Umozliwia to biezaca ocene jakosci regulacji bez koniecznosci analizy surowych danych.
 
 %------------------------------------------------------------------------------
 \subsection{Zadawanie wartosci referencyjnej za pomoca komunikacji szeregowej lub urzadzenia wejscia}
@@ -382,7 +334,7 @@ void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd,
 \subsection{Wykorzystanie systemu kontroli wersji}
 %------------------------------------------------------------------------------
 
-Projekt wykorzystuje system kontroli wersji Git. Repozytorium znajduje sie w katalogu glownym projektu (\texttt{.git/}). 
+Projekt wykorzystuje system kontroli wersji Git. Repozytorium znajduje sie w katalogu glownym projektu (\texttt{.git/}).
 
 \begin{figure}[H]
     \centering
@@ -499,13 +451,34 @@ System posiada 5 diod LED (PE2--PE6) wizualizujacych aktualny uchyb regulacji:
 \end{itemize}
 
 \begin{lstlisting}[caption={Definicje pinow LED (main.h)}, style=cstyle]
-// --- LED Error Bar ---
-#define LED_ERR_PORT      GPIOE
-#define LED_ERR_1_Pin     GPIO_PIN_2
-#define LED_ERR_2_Pin     GPIO_PIN_3
-#define LED_ERR_3_Pin     GPIO_PIN_4
-#define LED_ERR_4_Pin     GPIO_PIN_5
-#define LED_ERR_5_Pin     GPIO_PIN_6
+void UpdateErrorLEDs_5LED(float error) {
+	// Wyłącz wszystkie LEDy (PE2..PE6)
+	HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | 
+	                         LED_ERR_4_Pin | LED_ERR_5_Pin, GPIO_PIN_RESET);
+	
+	// Progi: 
+	// 1% z 250mm = 2.5mm
+	// 5% z 250mm = 12.5mm
+	float limit_green = 2.5f;
+	float limit_yellow = 12.5f;
+	
+	if (error < -limit_yellow) {
+		// Duży ujemny -> Czerwona (PE2 - LED_ERR_1)
+		HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin, GPIO_PIN_SET);
+	} else if (error < -limit_green) {
+		// Średni ujemny -> Żółta (PE3 - LED_ERR_2)
+		HAL_GPIO_WritePin(GPIOE, LED_ERR_2_Pin, GPIO_PIN_SET);
+	} else if (error <= limit_green) { 
+		// Mały błąd (+/- 2.5mm) -> Zielona (PE4 - LED_ERR_3)
+		HAL_GPIO_WritePin(GPIOE, LED_ERR_3_Pin, GPIO_PIN_SET);
+	} else if (error <= limit_yellow) {
+		// Średni dodatni -> Żółta (PE5 - LED_ERR_4)
+		HAL_GPIO_WritePin(GPIOE, LED_ERR_4_Pin, GPIO_PIN_SET);
+	} else {
+		// Duży dodatni -> Czerwona (PE6 - LED_ERR_5)
+		HAL_GPIO_WritePin(GPIOE, LED_ERR_5_Pin, GPIO_PIN_SET);
+	}
+}
 \end{lstlisting}
 
 \begin{figure}[H]
