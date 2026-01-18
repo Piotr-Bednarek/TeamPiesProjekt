@@ -1,18 +1,25 @@
+
 import sys
 import time
 import csv
 import os
 from datetime import datetime
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog, QTabWidget
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+                               QComboBox, QSplitter, QFileDialog, QTabWidget, QApplication, 
+                               QMessageBox, QFrame, QDoubleSpinBox)
+from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QIcon
 
 from serial_manager import SerialManager
 from widgets.metrics_panel import MetricsPanel
 from widgets.control_panel import ControlPanel
 from widgets.charts_panel import ChartsPanel
+from widgets.charts_panel import ChartsPanel
 from widgets.terminal import Terminal
 from utils.metrics import calculate_metrics
+
+# Reverted Scipy Impor - Using embedded signal
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -139,8 +146,10 @@ class MainWindow(QMainWindow):
         self.update_timer.timeout.connect(self._update_ui_tick)
         self.update_timer.start(100)
         
-        # Initial port list
         self.serial.list_ports()
+
+        # Connect rx_log to handler for special messages
+        self.serial.rx_log.connect(self._handle_rx_log)
 
         # Bezposrednie wysylanie setpointu
         self.control_panel.setpoint_update.disconnect()
@@ -208,35 +217,35 @@ class MainWindow(QMainWindow):
         # LED indicators (red = stop, green = run) - using fixed size widgets
         self.led_red = QLabel()
         self.led_red.setFixedSize(16, 16)
-        self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")  # Active (stop state)
+        self.led_red.setStyleSheet("background-color: #3a1a1a; border-radius: 8px;")  # Dim (inactive)
         layout.addWidget(self.led_red)
         
         self.led_green = QLabel()
         self.led_green.setFixedSize(16, 16)
-        self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")  # Dim (inactive)
+        self.led_green.setStyleSheet("background-color: #4ade80; border-radius: 8px;")  # Active (running)
         layout.addWidget(self.led_green)
         
         # Start/Stop Button
-        self.btn_regulator = QPushButton("START")
+        self.btn_regulator = QPushButton("STOP")
         self.btn_regulator.setObjectName("startBtn")
         self.btn_regulator.setFixedSize(60, 26)
         self.btn_regulator.setStyleSheet("""
             QPushButton { 
-                background-color: #22c55e; 
+                background-color: #ef4444; 
                 color: white; 
                 border: none; 
                 border-radius: 3px;
                 font-weight: bold;
                 font-size: 10px;
             }
-            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:hover { background-color: #dc2626; }
             QPushButton:disabled { background-color: #444; color: #666; }
         """)
         self.btn_regulator.clicked.connect(self._toggle_regulator)
         layout.addWidget(self.btn_regulator)
         
         # Track regulator state
-        self.regulator_running = False
+        self.regulator_running = True
         
         return tile
 
@@ -260,6 +269,10 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(10)
         
+        # Make left layout stretchable to push terminal to bottom
+        # We will add a scroll area if needed, but for now just layout
+
+        
         # Header
         header = QLabel("TEST IDENTYFIKACJI")
         header.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px;")
@@ -269,9 +282,58 @@ class MainWindow(QMainWindow):
         info_label = QLabel("Sygnał sterujący wgrany na STM32.\nPrzycisk START uruchamia test.")
         info_label.setStyleSheet("color: #666; font-size: 10px;")
         info_label.setWordWrap(True)
+        info_label.setWordWrap(True)
         left_layout.addWidget(info_label)
         
-        # Start Test Button
+        # --- Manual Angle Control ---
+        manual_frame = QFrame()
+        manual_frame.setStyleSheet("background-color: rgba(255,255,255,0.05); border-radius: 4px; padding: 5px;")
+        manual_layout = QHBoxLayout(manual_frame)
+        manual_layout.setContentsMargins(5, 5, 5, 5)
+        
+        lbl_angle = QLabel("Kąt:")
+        lbl_angle.setStyleSheet("color: #ccc;")
+        
+        self.spin_test_angle = QDoubleSpinBox()
+        self.spin_test_angle.setRange(0, 200)
+        self.spin_test_angle.setValue(100.0)
+        self.spin_test_angle.setSuffix(" °")
+        self.spin_test_angle.setStyleSheet("background-color: #222; color: white; border: 1px solid #444;")
+        
+        self.btn_set_angle = QPushButton("Ustaw")
+        self.btn_set_angle.setFixedWidth(60)
+        self.btn_set_angle.setStyleSheet("""
+            QPushButton { background-color: #64748b; color: white; border: none; border-radius: 3px; padding: 4px; }
+            QPushButton:hover { background-color: #475569; }
+            QPushButton:pressed { background-color: #334155; }
+        """)
+        self.btn_set_angle.clicked.connect(self._set_manual_test_angle)
+        self.btn_set_angle.setEnabled(False) # Disabled until connected
+        
+        manual_layout.addWidget(lbl_angle)
+        manual_layout.addWidget(self.spin_test_angle)
+        manual_layout.addWidget(self.btn_set_angle)
+        
+        left_layout.addWidget(manual_frame)
+
+        # Center Servo Button
+        self.btn_center_servo = QPushButton("⬌ WYCENTRUJ BELKĘ")
+        self.btn_center_servo.setFixedHeight(35)
+        self.btn_center_servo.setStyleSheet("""
+            QPushButton { 
+                background-color: #3b82f6; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #2563eb; }
+        """)
+        self.btn_center_servo.clicked.connect(self._center_servo)
+        left_layout.addWidget(self.btn_center_servo)
+        
+        # Start Test Button (Embedded)
         self.btn_test_start = QPushButton("▶ START TEST")
         self.btn_test_start.setFixedHeight(40)
         self.btn_test_start.setStyleSheet("""
@@ -331,7 +393,20 @@ class MainWindow(QMainWindow):
         self.btn_test_clear.clicked.connect(self._clear_test_data)
         left_layout.addWidget(self.btn_test_clear)
         
-        left_layout.addStretch()
+        # --- Terminal for Tab 2 ---
+        left_layout.addStretch() # Push terminal to bottom of left panel
+        
+        lbl_term = QLabel("Logi:")
+        lbl_term.setStyleSheet("color: #666; font-size: 10px; margin-top: 10px;")
+        left_layout.addWidget(lbl_term)
+        
+        self.terminal_test = Terminal()
+        self.terminal_test.setMaximumHeight(200) # Limit height in left panel
+        left_layout.addWidget(self.terminal_test)
+        
+        # Connect signals to this terminal too
+        self.serial.rx_log.connect(lambda msg, t: self.terminal_test.append_rx(msg, t))
+        self.serial.tx_log.connect(self.terminal_test.append_tx)
         
         # --- Right Panel: Charts ---
         right_widget = QWidget()
@@ -381,6 +456,9 @@ class MainWindow(QMainWindow):
         
         self.tab_widget.addTab(self.csv_tab, "Test Identyfikacji")
         
+        # Test data state
+        self.test_recording = False
+        self.test_data = []
         # Test data state
         self.test_recording = False
         self.test_data = []
@@ -435,6 +513,7 @@ class MainWindow(QMainWindow):
             self.is_recording = True
             self.recording_data = []
             self.recording_start_time = time.time()
+            self.recording_stm_start = None  # Reset STM32 time reference
             
             self.btn_rec_toggle.setText("⏹")
             self.btn_rec_toggle.setStyleSheet("""
@@ -570,10 +649,6 @@ class MainWindow(QMainWindow):
                 # I need to modify serial_manager to return formatted strings or handle the split here.
                 # Let's modify serial_manager list_ports first? Or just do it here if possible.
                 # serial_manager just returns `p.device`.
-                # I will quick-fix serial_manager to return "COMx - Desc" in next step or assume user is OK with COMx for now 
-                # OR better: The user asked "niech w dropdownie automatycznie bedzie wybrany ten co ma w tytule stm".
-                # This implies the dropdown DOES contain titles.
-                # Currently serial_manager returns only `p.device`.
                 # I should upgrade serial_manager to return full desc.
                 
                 # For now, pass what we have.
@@ -590,6 +665,16 @@ class MainWindow(QMainWindow):
             self.combo_ports.setEnabled(False)
             self.btn_refresh.setEnabled(False)
             self.btn_connect.setStyle(self.btn_connect.style()) 
+            
+            # Reset STM32 state on connect
+            QThread.msleep(100)
+            self.serial.send_setpoint(125)
+            self.serial.send_command("L:100.0") # Center Servo (Angle)
+            
+            # Enable Test Tab controls
+            self.btn_set_angle.setEnabled(True)
+            self.btn_center_servo.setEnabled(True)
+            self.btn_test_start.setEnabled(True)
         else:
             self.btn_connect.setText("Połącz")
             self.btn_connect.setObjectName("connectBtn")
@@ -597,6 +682,12 @@ class MainWindow(QMainWindow):
             self.lbl_status.setStyleSheet("color: #ef4444; font-weight: bold; font-size: 10px;")
             self.combo_ports.setEnabled(True)
             self.btn_refresh.setEnabled(True)
+            self.btn_connect.setStyle(self.btn_connect.style())
+            
+            # Disable Test Tab controls
+            self.btn_set_angle.setEnabled(False)
+            self.btn_center_servo.setEnabled(False)
+            self.btn_test_start.setEnabled(False)
             
     def _on_new_data(self, data):
         # Always append to history for charting
@@ -610,9 +701,14 @@ class MainWindow(QMainWindow):
         if len(self.data_history) > 1000: # Keep more history in desktop
             self.data_history.pop(0)
         
-        # Recording logic - collect data with relative timestamp
+        # Recording logic - use STM32's internal time (HAL_GetTick in ms)
         if self.is_recording:
-            relative_time = current_time - self.recording_start_time
+            stm_time_ms = data.get('stm_time', 0)
+            # Convert to seconds and make relative to first sample
+            if not hasattr(self, 'recording_stm_start') or self.recording_stm_start is None:
+                self.recording_stm_start = stm_time_ms
+            relative_time = (stm_time_ms - self.recording_stm_start) / 1000.0
+            
             record = {
                 'time': round(relative_time, 4),
                 'distance': data.get('distance', 0),
@@ -631,7 +727,12 @@ class MainWindow(QMainWindow):
         
         # Collect data for Test Identification tab if recording
         if hasattr(self, 'test_recording') and self.test_recording:
-            relative_time = current_time - self.test_start_time
+            stm_time_ms = data.get('stm_time', 0)
+            # Use STM32 internal time for accurate sampling
+            if not hasattr(self, 'test_stm_start') or self.test_stm_start is None:
+                self.test_stm_start = stm_time_ms
+            relative_time = (stm_time_ms - self.test_stm_start) / 1000.0
+            
             test_record = {
                 'time': round(relative_time, 4),
                 'distance': data.get('distance', 0),
@@ -685,6 +786,7 @@ class MainWindow(QMainWindow):
             self.test_recording = True
             self.test_data = []
             self.test_start_time = time.time()
+            self.test_stm_start = None  # Reset STM32 time reference
             
             # Send start command to STM32
             self.serial.send_command("TEST:START")
@@ -724,6 +826,64 @@ class MainWindow(QMainWindow):
             """)
             self.lbl_test_status.setText(f"Status: Zakończono ({len(self.test_data)} próbek)")
             self.lbl_test_status.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+    def _handle_rx_log(self, msg, type):
+        # Detect end of test sequence
+        if "TEST:FINISHED" in msg:
+            if self.test_recording:
+                self._start_identification_test() # Toggle off -> executes stop logic
+                self.terminal.append_rx("Wykryto koniec sekwencji (STM32). Zatrzymano nagrywanie.", "success")
+
+    def _center_servo(self):
+        """Center the servo so user can place the ball"""
+        self.serial.send_regulator_state(0)  # Disable regulator
+        self.serial.send_command("L:100.0")  # Center servo angle
+        self.terminal.append_rx("Wycentrowano belkę. Możesz położyć piłeczkę.", "info")
+        
+        # Update regulator button state in UI
+        self.regulator_running = False
+        self.btn_regulator.setText("START")
+        self.btn_regulator.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:disabled { background-color: #444; color: #666; }
+        """)
+        self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
+        self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")
+
+    def _set_manual_test_angle(self):
+        """Set manual servo angle and disable regulator"""
+        val = self.spin_test_angle.value()
+        self.serial.send_regulator_state(0)  # Disable regulator
+        QThread.msleep(100) # Wait for STM32 to process R:0
+        self.serial.send_command(f"L:{val:.2f}")  # Set angle
+        self.terminal.append_rx(f"Ustawiono kąt: {val:.2f}° (Regulator OFF)", "info")
+        
+        # UI Sync
+        self.regulator_running = False
+        self.btn_regulator.setText("START")
+        self.btn_regulator.setStyleSheet("""
+            QPushButton { 
+                background-color: #22c55e; 
+                color: white; 
+                border: none; 
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #16a34a; }
+            QPushButton:disabled { background-color: #444; color: #666; }
+        """)
+        self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
+        self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")
+
     
     def _export_test_data(self):
         """Export recorded test data to CSV"""

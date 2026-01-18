@@ -81,7 +81,8 @@ class SerialManager(QObject):
             "error": 0,
             "control": 0,
             "setpoint": 125,
-            "freq": 0
+            "freq": 0,
+            "stm_time": 0  # STM32 HAL_GetTick() in ms
         }
         self.sample_count = 0
         self.last_time = time.time()
@@ -228,6 +229,9 @@ class SerialManager(QObject):
                     except: pass
                 elif seg.startswith("V:"):
                     try: val = float(seg[2:]); current_data["avg_error"] = val
+                    except: pass
+                elif seg.startswith("T:"):
+                    try: val = int(seg[2:]); current_data["stm_time"] = val
                     except: pass
                 elif seg.startswith("Z:"):
                     try: val = float(seg[2:]); current_data["setpoint"] = val

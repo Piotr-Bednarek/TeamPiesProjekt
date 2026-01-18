@@ -448,12 +448,6 @@ class ControlPanel(QWidget):
             QTimer.singleShot(2000, lambda: self.btn_save_cal.setText("Zapisz kalibrację (Gotowe)"))
 
     def update_data(self, data):
-        self.viz.set_data(data.get("distance", 0), data.get("setpoint", 125))
-        self.current_raw_distance = data.get("distance", 0) # Use raw distance for calibration?
-        # Note: React app uses `rawDistance` prop for calibration, which comes from `latestData.distance`.
-        # React app `distance` prop is filtered? No, `ControlPanel` gets `distance={latestData.filtered}` and `rawDistance={latestData.distance}`.
-        # So viz uses filtered, calibration uses raw.
-        # My `update_data` here receives the full dict, so I can split.
-        
-        self.viz.set_data(data.get("filtered", 0), data.get("setpoint", 150))
+        # Use filtered distance for visualization, raw for calibration
+        self.viz.set_data(data.get("filtered", 0), data.get("setpoint", 125))
         self.current_raw_distance = data.get("distance", 0)

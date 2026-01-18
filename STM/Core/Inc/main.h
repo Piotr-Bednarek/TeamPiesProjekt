@@ -143,7 +143,8 @@ void Error_Handler(void);
 #define SERVO_CENTER       100.0f
 #define SERVO_MIN_LIMIT    70.0f
 #define SERVO_MAX_LIMIT    130.0f
-#define SERVO_ANGLE_DEADBAND 1.0f
+#define SERVO_SLEW_RATE    200.0f
+#define SERVO_ANGLE_DEADBAND 0.0f
 #define SERVO_SMOOTHING_SIZE 1
 
 // --- Servo Hardware (PWM) ---
@@ -152,8 +153,8 @@ void Error_Handler(void);
 #define SERVO_MAX_ANGLE    200
 
 // --- PID & Filtration ---
-#define D_DEADBAND         0.5f
-#define D_FILTER_ALPHA     0.5f
+#define D_DEADBAND         0.0f
+#define D_FILTER_ALPHA     0.3f
 
 // --- LED Error Bar ---
 #define LED_ERR_PORT      GPIOE
