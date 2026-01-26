@@ -2,3 +2,6 @@ STM/Debug
 STM/.settings
 
 *.pyc
+
+.venv
+.vscode

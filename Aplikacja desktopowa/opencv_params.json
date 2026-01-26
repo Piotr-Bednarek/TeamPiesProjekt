@@ -1,0 +1,20 @@
+{
+    "ball_detection": {
+        "h_min": 15,
+        "h_max": 56,
+        "s_min": 76,
+        "s_max": 141,
+        "v_min": 107,
+        "v_max": 255,
+        "blur_size": 21,
+        "min_area": 1000
+    },
+    "aruco_detection": {
+        "brightness": -50,
+        "contrast": 0.61,
+        "gamma": 2.33,
+        "adaptive_const": 1,
+        "min_size": 0.001,
+        "min_area": 0
+    }
+}

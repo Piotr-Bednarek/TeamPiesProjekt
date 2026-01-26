@@ -125,58 +125,39 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  // Bufor na wiadomości UART
-  char msgBuffer[64];
-
-  // Struktura na statystyki pomiaru
-  statInfo_t_VL53L0X distanceStr;
-
-  // Czekaj na ustabilizowanie zasilania
-  HAL_Delay(1000);
-
-  HAL_UART_Transmit(&huart3, (uint8_t*)"\r\n=== I2C Scanner ===\r\n", 23, 100);
-
-  // I2C Scanner - sprawdź które urządzenia są na magistrali
-  uint8_t devicesFound = 0;
-  for (uint8_t addr = 1; addr < 128; addr++) {
-      // Próba komunikacji z każdym adresem
-      HAL_StatusTypeDef result = HAL_I2C_IsDeviceReady(&hi2c1, (addr << 1), 2, 10);
-      if (result == HAL_OK) {
-          sprintf(msgBuffer, "Found device at 0x%02X\r\n", addr);
-          HAL_UART_Transmit(&huart3, (uint8_t*)msgBuffer, strlen(msgBuffer), 100);
-          devicesFound++;
-      }
-  }
-
-  if (devicesFound == 0) {
-      HAL_UART_Transmit(&huart3, (uint8_t*)"No I2C devices found!\r\n", 23, 100);
-  } else {
-      sprintf(msgBuffer, "Total: %d device(s)\r\n", devicesFound);
-      HAL_UART_Transmit(&huart3, (uint8_t*)msgBuffer, strlen(msgBuffer), 100);
-  }
-
-  HAL_UART_Transmit(&huart3, (uint8_t*)"====================\r\n\r\n", 24, 100);
+  // --- NOWA KONFIGURACJA (STRUCT-BASED) ---
+  struct VL53L0X myTOFsensor = {.io_2v8 = true, .address = 0x52 >> 1, .io_timeout = 500, .did_timeout = false}; // 0x29 default
 
   // Inicjalizacja czujnika VL53L0X
-  HAL_UART_Transmit(&huart3, (uint8_t*)"Initializing VL53L0X...\r\n", 25, 100);
+  HAL_UART_Transmit(&huart3, (uint8_t*)"Initializing VL53L0X (Struct)...\r\n", 34, 100);
 
-  if (!initVL53L0X(1, &hi2c1)) {
-      HAL_UART_Transmit(&huart3, (uint8_t*)"VL53L0X Init FAILED!\r\n", 22, 100);
-      // Zapal czerwoną LED (LD3) na stałe
-      HAL_GPIO_WritePin(GPIOB, LD3_Pin, GPIO_PIN_SET);
-  } else {
+  if (VL53L0X_init(&myTOFsensor)) {
       HAL_UART_Transmit(&huart3, (uint8_t*)"VL53L0X Init OK!\r\n", 18, 100);
-      // Mrugnij zieloną LED (LD1)
-      HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_SET); // Green LED
+      
+      // --- CONFIGURATION FROM USER SNIPPET ---
+      // LONG_RANGE settings
+	  // lower the return signal rate limit (default is 0.25 MCPS)
+	  VL53L0X_setSignalRateLimit(&myTOFsensor, 0.1);
+	  // increase laser pulse periods (defaults are 14 and 10 PCLKs)
+	  VL53L0X_setVcselPulsePeriod(&myTOFsensor, VcselPeriodPreRange, 18);
+	  VL53L0X_setVcselPulsePeriod(&myTOFsensor, VcselPeriodFinalRange, 14);
+
+      // HIGH_SPEED settings might be too fast for Long Range!
+      // Increasing budget to 50ms to be safe with Long Range pulses.
+      if (!VL53L0X_setMeasurementTimingBudget(&myTOFsensor, 50000)) {
+          HAL_UART_Transmit(&huart3, (uint8_t*)"Budget Fail!\r\n", 14, 100);
+      }
+      
+      VL53L0X_startContinuous(&myTOFsensor, 0);
+
       HAL_Delay(200);
       HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_RESET);
+  } else {
+      HAL_UART_Transmit(&huart3, (uint8_t*)"VL53L0X Init FAILED!\r\n", 22, 100);
+      HAL_GPIO_WritePin(GPIOB, LD3_Pin, GPIO_PIN_SET); // Red LED
   }
 
-  // --- DOMYŚLNA KONFIGURACJA (działająca) ---
-  // Używamy ustawień z initVL53L0X() bez zmian
-  // Tylko timeout musi być ustawiony
-
-  setTimeout(500);  // 500ms timeout
 
   // --- KONFIGURACJA FILTRA ---
   #define NOISE_THRESHOLD 2  // Ignoruj zmiany < 4mm (jitter)
@@ -191,8 +172,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // Pojedynczy pomiar
-    raw_dist = readRangeSingleMillimeters(&distanceStr);
+    // Pojedynczy pomiar CONTINUOUS
+    raw_dist = VL53L0X_readRangeContinuousMillimeters(&myTOFsensor);
+
+    if (VL53L0X_timeoutOccurred(&myTOFsensor)) {
+         HAL_UART_Transmit(&huart3, (uint8_t*)"TIMEOUT\r\n", 9, 100);
+         continue;
+    }
 
     // --- HYBRYDOWY ŁAŃCUCH FILTRÓW ---
     // 1. Rate Limiter (Odsiewanie szpilek)
@@ -249,15 +235,14 @@ int main(void)
 
     // Format kompatybilny z Python GUI:
     // D:Dist (surowy); F:Filtered (przefiltrowany); Z:Setpoint (tutaj = Dist)
+    char msgBuffer[64]; // Declare local buffer
     char data_buffer[64];
-    int len = sprintf(data_buffer, "D:%d;Z:%d;A:100;F:%d;E:0;V:0;S:%d",
-                      raw_dist, raw_dist, final_output, distanceStr.rangeStatus);
+    int len = sprintf(data_buffer, "D:%d;Z:%d;A:100;F:%d;E:0;V:0;S:0",
+                      raw_dist, raw_dist, final_output);
 
     // Oblicz prawdziwe CRC8
     uint8_t crc = CalculateCRC8(data_buffer, len);
     sprintf(msgBuffer, "%s;C:%02X\r\n", data_buffer, crc);
-
-
 
     // Wyślij przez UART
     HAL_UART_Transmit(&huart3, (uint8_t*)msgBuffer, strlen(msgBuffer), 50);
@@ -265,8 +250,8 @@ int main(void)
     // Migaj niebieską LED przy każdym odczycie
     HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
 
-    // Pauza 30ms między pomiarami (jak w oryginalnym projekcie)
-    HAL_Delay(30);
+    // Pauza 20ms dla High Speed (timing budget 20ms)
+    // HAL_Delay(20);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

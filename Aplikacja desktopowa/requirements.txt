@@ -2,3 +2,4 @@ pyserial
 PySide6
 pyqtgraph
 numpy
+opencv-python
