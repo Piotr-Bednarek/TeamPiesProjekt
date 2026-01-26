@@ -315,24 +315,8 @@ class OpenCVPanel(QWidget):
     def _save_parameters(self):
         """Save all detection parameters to a JSON file"""
         params = {
-            "ball_detection": {
-                "h_min": self.h_min,
-                "h_max": self.h_max,
-                "s_min": self.s_min,
-                "s_max": self.s_max,
-                "v_min": self.v_min,
-                "v_max": self.v_max,
-                "blur_size": self.blur_size,
-                "min_area": self.min_area
-            },
-            "aruco_detection": {
-                "brightness": self.aruco_brightness,
-                "contrast": self.aruco_contrast,
-                "gamma": self.aruco_gamma,
-                "adaptive_const": self.aruco_adaptive_const,
-                "min_size": self.aruco_min_size,
-                "min_area": self.aruco_min_area
-            }
+            "ball_detection": {"h_min": self.h_min, "h_max": self.h_max, "s_min": self.s_min, "s_max": self.s_max, "v_min": self.v_min, "v_max": self.v_max, "blur_size": self.blur_size, "min_area": self.min_area},
+            "aruco_detection": {"brightness": self.aruco_brightness, "contrast": self.aruco_contrast, "gamma": self.aruco_gamma, "adaptive_const": self.aruco_adaptive_const, "min_size": self.aruco_min_size, "min_area": self.aruco_min_area},
         }
         try:
             with open(self._get_params_file_path(), "w") as f:
