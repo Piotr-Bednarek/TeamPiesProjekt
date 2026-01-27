@@ -10,7 +10,7 @@ from datetime import datetime
 
 class OpenCVPanel(QWidget):
     ball_position_update = Signal(int, int)  # Signal for ball position (x, y)
-    aruco_markers_update = Signal(dict)  # Signal for ArUco markers {id: (x, y)}
+    aruco_markers_update = Signal(object)  # Signal for ArUco markers {id: (x, y)}
     ball_on_beam_update = Signal(float)  # Signal for ball position on beam (0.0 to 1.0, -1 if not detected)
     beam_angle_update = Signal(float)  # Signal for angle between beams in degrees
 
@@ -47,7 +47,16 @@ class OpenCVPanel(QWidget):
         self.aruco_min_area = 500  # minimum marker area in px^2
         self.aruco_adaptive_const = 5
         self.aruco_min_size = 0.01
-        
+
+        # Enhanced ArUco detection parameters
+        self.aruco_upscale_enabled = True  # Enable super-resolution upscaling
+        self.aruco_upscale_factor = 1.5  # Upscaling factor (1.0 = no scaling, 2.0 = double)
+        self.aruco_sharpen_enabled = True  # Enable sharpening kernel
+        self.aruco_apriltag_refine = True  # Use APRILTAG refinement method (more robust)
+
+        # Sharpening kernel (emphasizes edges)
+        self._sharpen_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]], dtype=np.float32)
+
         # ArUco display parameters (only for visualization, not detection)
         self.aruco_brightness = 0  # -50 to +50
         self.aruco_contrast = 1.0  # 0.5 to 2.0
@@ -59,7 +68,7 @@ class OpenCVPanel(QWidget):
         self.calib_min = 0.0  # raw value when ball is at 0mm
         self.calib_max = 1.0  # raw value when ball is at 250mm
         self.beam_length_mm = 250  # beam length in millimeters
-        
+
         # Angle offset calibration
         self.angle_offset = 0.0  # offset to add to measured angle (degrees)
         self.angle_method = 0  # 0 = relative to horizontal, 1 = relative to reference line (ID1-ID3)
@@ -76,14 +85,29 @@ class OpenCVPanel(QWidget):
         self.aruco_params.adaptiveThreshConstant = 5
         self.aruco_params.minMarkerLengthRatioOriginalImg = 0.01
         self.aruco_params.detectInvertedMarker = True
-        # Advanced detection parameters
-        self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+
+        # Advanced detection parameters - RELAXED for better small marker detection
+        # Try APRILTAG refinement first (more robust for small/blurry markers)
+        try:
+            self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+        except AttributeError:
+            # Fallback for older OpenCV versions
+            self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.aruco_params.cornerRefinementWinSize = 5
         self.aruco_params.cornerRefinementMaxIterations = 30
         self.aruco_params.errorCorrectionRate = 0.6
-        self.aruco_params.polygonalApproxAccuracyRate = 0.03
-        self.aruco_params.minCornerDistanceRate = 0.05
-        self.aruco_params.minDistanceToBorder = 3
+
+        # RELAXED parameters for distorted/small markers
+        self.aruco_params.polygonalApproxAccuracyRate = 0.08  # Default 0.03, allow more distorted shapes
+        self.aruco_params.minMarkerPerimeterRate = 0.015  # Very low for small markers
+        self.aruco_params.maxMarkerPerimeterRate = 4.0  # Default
+        self.aruco_params.minCornerDistanceRate = 0.03  # Reduced from 0.05
+        self.aruco_params.minDistanceToBorder = 2  # Reduced from 3
+
+        # Perspective correction for small markers
+        self.aruco_params.perspectiveRemovePixelPerCell = 10  # Default 4, more pixels for analysis
+        self.aruco_params.perspectiveRemoveIgnoredMarginPerCell = 0.15  # Margin of error inside marker
+
         # Store advanced params for UI
         self.aruco_error_correction = 0.6
         self.aruco_corner_refine = True
@@ -98,7 +122,7 @@ class OpenCVPanel(QWidget):
         self._aruco_hold_frames = {}  # Counter for how many frames marker is missing
         self._aruco_hold_max = 15  # Max frames to hold marker position
         self._last_aruco_ids = set()  # For logging state changes
-        
+
         # Measurement results
         self.ball_position_on_beam = -1.0  # 0.0 to 1.0, -1 if not detected
         self.ball_position_mm = -1.0  # Position in millimeters
@@ -109,7 +133,7 @@ class OpenCVPanel(QWidget):
         # Timer for camera feed
         self.camera_timer = QTimer()
         self.camera_timer.timeout.connect(self._process_frame)
-        
+
         # Auto-load parameters on startup
         self._auto_load_parameters()
 
@@ -124,6 +148,18 @@ class OpenCVPanel(QWidget):
         # Camera controls
         cam_group = QGroupBox("Sterowanie kamerą")
         cam_layout = QHBoxLayout(cam_group)
+
+        # Camera selection dropdown
+        cam_layout.addWidget(QLabel("Kamera:"))
+        self.combo_camera = QComboBox()
+        self.combo_camera.setFixedWidth(120)
+        self.combo_camera.addItem("Auto", -1)
+        self.combo_camera.addItem("Kamera 0", 0)
+        self.combo_camera.addItem("Kamera 1", 1)
+        self.combo_camera.addItem("Kamera 2", 2)
+        self.combo_camera.addItem("Kamera 3", 3)
+        self.combo_camera.setCurrentIndex(0)  # Auto by default
+        cam_layout.addWidget(self.combo_camera)
 
         self.btn_start_camera = QPushButton("Start Camera")
         self.btn_start_camera.setFixedHeight(32)
@@ -167,7 +203,7 @@ class OpenCVPanel(QWidget):
 
         # Right side: Tab widget + global log
         right_layout = QVBoxLayout()
-        
+
         self.tab_widget = QTabWidget()
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
@@ -184,7 +220,7 @@ class OpenCVPanel(QWidget):
         self.tab_widget.addTab(measurements_tab, "Pomiary")
 
         right_layout.addWidget(self.tab_widget, stretch=3)
-        
+
         # Global log panel at the bottom
         global_log_group = QGroupBox("Log systemowy")
         global_log_layout = QVBoxLayout(global_log_group)
@@ -269,7 +305,7 @@ class OpenCVPanel(QWidget):
         proc_layout.addWidget(self.lbl_blur, 0, 2)
 
         proc_layout.addWidget(QLabel("Min Area:"), 1, 0)
-        self.slider_min_area = self._create_slider(10, 1000, self.min_area)
+        self.slider_min_area = self._create_slider(10, 3000, self.min_area)
         self.slider_min_area.valueChanged.connect(self._on_min_area_changed)
         proc_layout.addWidget(self.slider_min_area, 1, 1)
         self.lbl_min_area = QLabel(str(self.min_area))
@@ -287,17 +323,13 @@ class OpenCVPanel(QWidget):
         btn_layout.addWidget(self.btn_load_ball)
         sliders_layout.addLayout(btn_layout)
 
-        # Log panel for ball detection
-        log_group = QGroupBox("Log detekcji")
-        log_layout = QVBoxLayout(log_group)
-        log_layout.setContentsMargins(5, 5, 5, 5)
-        self.ball_log = QTextEdit()
-        self.ball_log.setReadOnly(True)
-        self.ball_log.setMinimumHeight(80)
-        self.ball_log.setMaximumHeight(100)
-        self.ball_log.setStyleSheet("background-color: #1a1a1a; color: #10b981; font-family: 'Consolas', monospace; font-size: 11px;")
-        log_layout.addWidget(self.ball_log)
-        sliders_layout.addWidget(log_group)
+        # Info about min_area parameter
+        info_label = QLabel("Min Area: minimalna powierzchnia konturu [px²] aby uznać za piłeczkę")
+        info_label.setStyleSheet("color: #888; font-size: 10px; margin-top: 5px;")
+        info_label.setWordWrap(True)
+        sliders_layout.addWidget(info_label)
+
+        sliders_layout.addStretch()
 
         return tab
 
@@ -350,11 +382,41 @@ class OpenCVPanel(QWidget):
 
         sliders_layout.addWidget(aruco_group)
 
-        # Display adjustments (only for visualization, not detection)
-        display_group = QGroupBox("Wizualizacja (tylko podglad)")
+        # ENHANCED: Super-resolution and preprocessing options
+        enhanced_group = QGroupBox("Ulepszona detekcja (Super-Resolution)")
+        enhanced_layout = QGridLayout(enhanced_group)
+
+        # Upscaling checkbox and slider
+        self.chk_upscale = QCheckBox("Upscaling (powiększenie)")
+        self.chk_upscale.setChecked(self.aruco_upscale_enabled)
+        self.chk_upscale.stateChanged.connect(self._on_upscale_changed)
+        self.chk_upscale.setToolTip("Powiększa obraz przed detekcją - lepsze wyniki dla małych markerów")
+        enhanced_layout.addWidget(self.chk_upscale, 0, 0)
+
+        enhanced_layout.addWidget(QLabel("Skala:"), 0, 1)
+        self.slider_upscale_factor = self._create_slider(10, 30, int(self.aruco_upscale_factor * 10))
+        self.slider_upscale_factor.valueChanged.connect(self._on_upscale_factor_changed)
+        enhanced_layout.addWidget(self.slider_upscale_factor, 0, 2)
+        self.lbl_upscale_factor = QLabel(f"{self.aruco_upscale_factor:.1f}x")
+        enhanced_layout.addWidget(self.lbl_upscale_factor, 0, 3)
+
+        self.chk_sharpen = QCheckBox("Wyostrzanie krawędzi")
+        self.chk_sharpen.setChecked(self.aruco_sharpen_enabled)
+        self.chk_sharpen.stateChanged.connect(self._on_sharpen_changed)
+        self.chk_sharpen.setToolTip("Podkreśla krawędzie - lepsze wykrywanie ramek markerów")
+        enhanced_layout.addWidget(self.chk_sharpen, 1, 0, 1, 4)
+
+        self.chk_apriltag = QCheckBox("Metoda APRILTAG (robustna)")
+        self.chk_apriltag.setChecked(self.aruco_apriltag_refine)
+        self.chk_apriltag.stateChanged.connect(self._on_apriltag_changed)
+        self.chk_apriltag.setToolTip("Bardziej odporna metoda doprecyzowywania narożników (wolniejsza)")
+        enhanced_layout.addWidget(self.chk_apriltag, 2, 0, 1, 4)
+
+        sliders_layout.addWidget(enhanced_group)
+
+        display_group = QGroupBox("Przetwarzanie obrazu")
         display_layout = QGridLayout(display_group)
 
-        # Brightness
         display_layout.addWidget(QLabel("Jasnosc:"), 0, 0)
         self.slider_aruco_brightness = self._create_slider(-100, 100, self.aruco_brightness)
         self.slider_aruco_brightness.valueChanged.connect(self._on_aruco_brightness_changed)
@@ -379,11 +441,6 @@ class OpenCVPanel(QWidget):
         display_layout.addWidget(self.lbl_aruco_gamma, 2, 2)
 
         sliders_layout.addWidget(display_group)
-
-        # Info label
-        info_label = QLabel("Linie: Magenta (ID2->ID0), Zolta (ID1->ID3)")
-        info_label.setStyleSheet("color: #888; font-size: 10px;")
-        sliders_layout.addWidget(info_label)
 
         # Save/Load buttons for ArUco detection
         btn_layout = QHBoxLayout()
@@ -459,7 +516,7 @@ class OpenCVPanel(QWidget):
         self.lbl_calib_min = QLabel(f"{self.calib_min:.3f}")
         self.lbl_calib_min.setStyleSheet("font-weight: bold;")
         calib_layout.addWidget(self.lbl_calib_min, 0, 1)
-        
+
         calib_layout.addWidget(QLabel("Max (250mm):"), 1, 0)
         self.lbl_calib_max = QLabel(f"{self.calib_max:.3f}")
         self.lbl_calib_max.setStyleSheet("font-weight: bold;")
@@ -487,6 +544,7 @@ class OpenCVPanel(QWidget):
         # Angle measurement method
         angle_layout.addWidget(QLabel("Metoda pomiaru:"), 0, 0)
         from PySide6.QtWidgets import QComboBox
+
         self.combo_angle_method = QComboBox()
         self.combo_angle_method.addItem("Wzgledem poziomu obrazu (ID2-ID0)")
         self.combo_angle_method.addItem("Wzgledem linii ref. (ID1-ID3)")
@@ -520,7 +578,7 @@ class OpenCVPanel(QWidget):
 
     def _calibrate_min(self):
         """Set calibration minimum (0mm position)"""
-        if hasattr(self, '_raw_ball_position') and self._raw_ball_position >= 0:
+        if hasattr(self, "_raw_ball_position") and self._raw_ball_position >= 0:
             self.calib_min = self._raw_ball_position
             self.lbl_calib_min.setText(f"{self.calib_min:.3f}")
             self._log_ball(f"Kalibracja 0mm ustawiona: {self.calib_min:.3f}")
@@ -528,7 +586,7 @@ class OpenCVPanel(QWidget):
 
     def _calibrate_max(self):
         """Set calibration maximum (250mm position)"""
-        if hasattr(self, '_raw_ball_position') and self._raw_ball_position >= 0:
+        if hasattr(self, "_raw_ball_position") and self._raw_ball_position >= 0:
             self.calib_max = self._raw_ball_position
             self.lbl_calib_max.setText(f"{self.calib_max:.3f}")
             self._log_ball(f"Kalibracja 250mm ustawiona: {self.calib_max:.3f}")
@@ -556,7 +614,7 @@ class OpenCVPanel(QWidget):
 
     def _calibrate_angle_zero(self):
         """Set current angle as zero (calculate offset)"""
-        if hasattr(self, '_raw_beam_angle'):
+        if hasattr(self, "_raw_beam_angle"):
             self.angle_offset = -self._raw_beam_angle
             self.slider_angle_offset.setValue(int(self.angle_offset * 10))
             self.lbl_angle_offset.setText(f"{self.angle_offset:.1f}°")
@@ -584,7 +642,21 @@ class OpenCVPanel(QWidget):
         """Save all detection parameters to a JSON file"""
         params = {
             "ball_detection": {"h_min": self.h_min, "h_max": self.h_max, "s_min": self.s_min, "s_max": self.s_max, "v_min": self.v_min, "v_max": self.v_max, "blur_size": self.blur_size, "min_area": self.min_area},
-            "aruco_detection": {"adaptive_const": self.aruco_adaptive_const, "min_size": self.aruco_min_size, "min_area": self.aruco_min_area, "brightness": self.aruco_brightness, "contrast": self.aruco_contrast, "gamma": self.aruco_gamma, "error_correction": self.aruco_error_correction, "corner_refine": self.aruco_corner_refine},
+            "aruco_detection": {
+                "adaptive_const": self.aruco_adaptive_const,
+                "min_size": self.aruco_min_size,
+                "min_area": self.aruco_min_area,
+                "brightness": self.aruco_brightness,
+                "contrast": self.aruco_contrast,
+                "gamma": self.aruco_gamma,
+                "error_correction": self.aruco_error_correction,
+                "corner_refine": self.aruco_corner_refine,
+                # Enhanced detection params
+                "upscale_enabled": self.aruco_upscale_enabled,
+                "upscale_factor": self.aruco_upscale_factor,
+                "sharpen_enabled": self.aruco_sharpen_enabled,
+                "apriltag_refine": self.aruco_apriltag_refine,
+            },
             "calibration": {"min": self.calib_min, "max": self.calib_max, "angle_offset": self.angle_offset, "angle_method": self.angle_method},
         }
         try:
@@ -638,6 +710,15 @@ class OpenCVPanel(QWidget):
                 self.slider_error_correction.setValue(int(aruco["error_correction"] * 100))
             if "corner_refine" in aruco:
                 self.chk_corner_refine.setChecked(aruco["corner_refine"])
+            # Enhanced detection params
+            if "upscale_enabled" in aruco:
+                self.chk_upscale.setChecked(aruco["upscale_enabled"])
+            if "upscale_factor" in aruco:
+                self.slider_upscale_factor.setValue(int(aruco["upscale_factor"] * 10))
+            if "sharpen_enabled" in aruco:
+                self.chk_sharpen.setChecked(aruco["sharpen_enabled"])
+            if "apriltag_refine" in aruco:
+                self.chk_apriltag.setChecked(aruco["apriltag_refine"])
 
             # Load calibration params
             calib = params.get("calibration", {})
@@ -666,17 +747,9 @@ class OpenCVPanel(QWidget):
         self.current_tab = index
 
     def _log_ball(self, message, level="info"):
-        """Add a log message to the ball detection log panel"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        colors = {"info": "#10b981", "warn": "#fbbf24", "error": "#ef4444"}
-        color = colors.get(level, "#10b981")
-        self.ball_log.append(f'<span style="color:#666">[{timestamp}]</span> <span style="color:{color}">{message}</span>')
-        # Keep only last 50 lines
-        if self.ball_log.document().blockCount() > 50:
-            cursor = self.ball_log.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
+        """Add a log message to the global log panel (ball detection)"""
+        # Use global log with ball-specific color
+        self._log_global(f"[BALL] {message}", "ball")
 
     def _log_aruco(self, message, level="info"):
         """Add a log message to the ArUco detection log panel"""
@@ -745,7 +818,13 @@ class OpenCVPanel(QWidget):
             if "corner_refine" in aruco:
                 self.aruco_corner_refine = aruco["corner_refine"]
                 if self.aruco_corner_refine:
-                    self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+                    if self.aruco_apriltag_refine:
+                        try:
+                            self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+                        except AttributeError:
+                            self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+                    else:
+                        self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
                 else:
                     self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
             if "brightness" in aruco:
@@ -755,7 +834,16 @@ class OpenCVPanel(QWidget):
             if "gamma" in aruco:
                 self.aruco_gamma = aruco["gamma"]
                 self._update_gamma_lut()
-            
+            # Enhanced detection params
+            if "upscale_enabled" in aruco:
+                self.aruco_upscale_enabled = aruco["upscale_enabled"]
+            if "upscale_factor" in aruco:
+                self.aruco_upscale_factor = aruco["upscale_factor"]
+            if "sharpen_enabled" in aruco:
+                self.aruco_sharpen_enabled = aruco["sharpen_enabled"]
+            if "apriltag_refine" in aruco:
+                self.aruco_apriltag_refine = aruco["apriltag_refine"]
+
             # Rebuild ArUco detector with loaded params
             self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
 
@@ -847,11 +935,45 @@ class OpenCVPanel(QWidget):
         self.lbl_error_correction.setText(f"{self.aruco_error_correction:.2f}")
 
     def _on_corner_refine_changed(self, state):
-        self.aruco_corner_refine = (state == 2)  # Qt.Checked = 2
+        self.aruco_corner_refine = state == 2  # Qt.Checked = 2
         if self.aruco_corner_refine:
-            self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+            if self.aruco_apriltag_refine:
+                try:
+                    self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+                except AttributeError:
+                    self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+            else:
+                self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         else:
             self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
+        self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
+
+    # Enhanced ArUco detection callbacks
+    def _on_upscale_changed(self, state):
+        self.aruco_upscale_enabled = state == 2
+        self._log_global(f"Upscaling: {'ON' if self.aruco_upscale_enabled else 'OFF'}", "aruco")
+
+    def _on_upscale_factor_changed(self, val):
+        self.aruco_upscale_factor = val / 10.0
+        self.lbl_upscale_factor.setText(f"{self.aruco_upscale_factor:.1f}x")
+
+    def _on_sharpen_changed(self, state):
+        self.aruco_sharpen_enabled = state == 2
+        self._log_global(f"Wyostrzanie: {'ON' if self.aruco_sharpen_enabled else 'OFF'}", "aruco")
+
+    def _on_apriltag_changed(self, state):
+        self.aruco_apriltag_refine = state == 2
+        if self.aruco_corner_refine:
+            if self.aruco_apriltag_refine:
+                try:
+                    self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+                    self._log_global("Metoda doprecyzowania: APRILTAG", "aruco")
+                except AttributeError:
+                    self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+                    self._log_global("APRILTAG niedostępny - używam SUBPIX", "warn")
+            else:
+                self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+                self._log_global("Metoda doprecyzowania: SUBPIX", "aruco")
         self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
 
     def _on_aruco_brightness_changed(self, val):
@@ -903,7 +1025,7 @@ class OpenCVPanel(QWidget):
         self.btn_start_camera.setText("Stop Camera")
         self.lbl_camera_status.setText("Camera: ON")
         self.lbl_camera_status.setStyleSheet("color: #10b981; font-weight: bold;")
-        
+
         cam_info = f"Kamera uruchomiona (idx:{self._last_camera_index})"
         self._log_ball(cam_info)
         self._log_aruco(cam_info)
@@ -925,14 +1047,28 @@ class OpenCVPanel(QWidget):
         self.lbl_camera_status.setStyleSheet("color: #ef4444; font-weight: bold;")
         self.lbl_video.setText("Obraz z kamery pojawi się tutaj")
         self.lbl_fps.setText("FPS: 0.0")
-        
+
         self._log_ball("Kamera zatrzymana", "warn")
         self._log_aruco("Kamera zatrzymana", "warn")
         self._log_global("Kamera zatrzymana", "warn")
 
     def _find_camera(self):
         """Find and initialize the camera with caching for faster reconnection"""
-        # Try cached settings first (fastest path)
+        # Get selected camera from dropdown
+        selected_index = self.combo_camera.currentData()
+
+        # If specific camera selected (not Auto)
+        if selected_index is not None and selected_index >= 0:
+            for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF]:
+                cap = self._try_open_camera(selected_index, backend)
+                if cap is not None:
+                    self._last_camera_index = selected_index
+                    self._last_camera_backend = backend
+                    return cap
+            self._log_global(f"Nie można otworzyć kamery {selected_index}", "error")
+            return None
+
+        # Auto mode - try cached settings first (fastest path)
         if self._last_camera_index is not None:
             cap = self._try_open_camera(self._last_camera_index, self._last_camera_backend)
             if cap is not None:
@@ -942,7 +1078,7 @@ class OpenCVPanel(QWidget):
             self._last_camera_backend = None
 
         # Scan for camera: prioritize DSHOW (faster for DirectShow cameras like PS3 Eye)
-        for i in [1, 0, 2]:
+        for i in [1, 0, 2, 3]:
             for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF]:
                 cap = self._try_open_camera(i, backend)
                 if cap is not None:
@@ -1087,7 +1223,7 @@ class OpenCVPanel(QWidget):
         return combined
 
     def _process_aruco_detection(self, frame):
-        """Process frame for ArUco marker detection"""
+        """Process frame for ArUco marker detection with enhanced processing"""
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -1096,13 +1232,30 @@ class OpenCVPanel(QWidget):
             gray_adjusted = cv2.convertScaleAbs(gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
         else:
             gray_adjusted = gray
-        
+
         # Apply cached gamma correction
         if self._gamma_lut is not None:
             gray_adjusted = cv2.LUT(gray_adjusted, self._gamma_lut)
 
-        # Detect ArUco markers using adjusted grayscale
-        corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
+        # ENHANCED: Apply sharpening kernel (emphasizes edges for better marker detection)
+        if self.aruco_sharpen_enabled:
+            gray_adjusted = cv2.filter2D(gray_adjusted, -1, self._sharpen_kernel)
+
+        # ENHANCED: Super-resolution upscaling for small markers
+        scale_factor = self.aruco_upscale_factor if self.aruco_upscale_enabled else 1.0
+        if scale_factor > 1.0:
+            h, w = gray_adjusted.shape[:2]
+            # Use INTER_LANCZOS4 for best quality upscaling (better than CUBIC for edge detection)
+            gray_upscaled = cv2.resize(gray_adjusted, (int(w * scale_factor), int(h * scale_factor)), interpolation=cv2.INTER_LANCZOS4)
+            # Detect markers on upscaled image
+            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_upscaled)
+            # IMPORTANT: Scale detected corner coordinates back down to original resolution
+            if corners:
+                for corner in corners:
+                    corner /= scale_factor
+        else:
+            # Standard detection without upscaling
+            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
 
         # Filter markers by minimum area
         filtered_corners = []
@@ -1274,20 +1427,34 @@ class OpenCVPanel(QWidget):
                 self.ball_y = int(y)
                 self.ball_detected = True
 
-        # --- ArUco detection with hold (using brightness/contrast/gamma) ---
+        # --- ArUco detection with hold (using enhanced processing) ---
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
+
         # Apply brightness/contrast adjustments
         if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
             gray_adjusted = cv2.convertScaleAbs(gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
         else:
             gray_adjusted = gray
-        
+
         # Apply cached gamma correction
         if self._gamma_lut is not None:
             gray_adjusted = cv2.LUT(gray_adjusted, self._gamma_lut)
-        
-        corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
+
+        # ENHANCED: Apply sharpening kernel
+        if self.aruco_sharpen_enabled:
+            gray_adjusted = cv2.filter2D(gray_adjusted, -1, self._sharpen_kernel)
+
+        # ENHANCED: Super-resolution upscaling
+        scale_factor = self.aruco_upscale_factor if self.aruco_upscale_enabled else 1.0
+        if scale_factor > 1.0:
+            h, w = gray_adjusted.shape[:2]
+            gray_upscaled = cv2.resize(gray_adjusted, (int(w * scale_factor), int(h * scale_factor)), interpolation=cv2.INTER_LANCZOS4)
+            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_upscaled)
+            if corners:
+                for corner in corners:
+                    corner /= scale_factor
+        else:
+            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
 
         current_aruco_centers = {}
         if ids is not None and len(ids) > 0:
@@ -1326,11 +1493,7 @@ class OpenCVPanel(QWidget):
 
         # Ball position on beam (raw projection)
         if self.ball_detected and 2 in self.aruco_centers and 0 in self.aruco_centers:
-            self._raw_ball_position = self._project_point_on_line(
-                (self.ball_x, self.ball_y),
-                self.aruco_centers[2],
-                self.aruco_centers[0]
-            )
+            self._raw_ball_position = self._project_point_on_line((self.ball_x, self.ball_y), self.aruco_centers[2], self.aruco_centers[0])
             # Apply calibration to get corrected position
             self.ball_position_on_beam = self._apply_calibration(self._raw_ball_position)
             # Convert to mm
@@ -1340,15 +1503,10 @@ class OpenCVPanel(QWidget):
         if 2 in self.aruco_centers and 0 in self.aruco_centers:
             if self.angle_method == 0:
                 # Method 0: Angle relative to horizontal axis (no perspective issues)
-                self._raw_beam_angle = self._calculate_angle_to_horizontal(
-                    self.aruco_centers[2], self.aruco_centers[0]
-                )
+                self._raw_beam_angle = self._calculate_angle_to_horizontal(self.aruco_centers[2], self.aruco_centers[0])
             elif 1 in self.aruco_centers and 3 in self.aruco_centers:
                 # Method 1: Angle relative to reference line (ID1-ID3)
-                self._raw_beam_angle = self._calculate_angle_between_lines(
-                    self.aruco_centers[2], self.aruco_centers[0],
-                    self.aruco_centers[1], self.aruco_centers[3]
-                )
+                self._raw_beam_angle = self._calculate_angle_between_lines(self.aruco_centers[2], self.aruco_centers[0], self.aruco_centers[1], self.aruco_centers[3])
             # Apply angle offset
             self.beam_angle = self._raw_beam_angle + self.angle_offset
 

@@ -3,7 +3,7 @@ import time
 import csv
 import os
 from datetime import datetime
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog, QTabWidget, QApplication, QMessageBox, QFrame, QDoubleSpinBox
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSplitter, QFileDialog, QTabWidget, QApplication, QMessageBox, QFrame, QDoubleSpinBox, QCheckBox, QSpinBox
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QIcon
 
@@ -55,6 +55,18 @@ class MainWindow(QMainWindow):
         self.regulator_tile = self._create_regulator_tile()
         self.connection_row.addWidget(self.regulator_tile)
 
+        # Recording Tile (global - available on all tabs)
+        self.rec_tile = self._create_recording_tile()
+        self.connection_row.addWidget(self.rec_tile)
+
+        # Sampling Rate Control (global)
+        self.sampling_tile = self._create_sampling_tile()
+        self.connection_row.addWidget(self.sampling_tile)
+
+        # Angle Control (global)
+        self.angle_tile = self._create_angle_tile()
+        self.connection_row.addWidget(self.angle_tile)
+
         self.connection_row.addStretch()
 
         self.root_layout.addLayout(self.connection_row)
@@ -69,15 +81,11 @@ class MainWindow(QMainWindow):
         self.main_layout.setContentsMargins(0, 10, 0, 0)
         self.main_layout.setSpacing(10)
 
-        # 1. Top Row: Recording Tile + Metrics (connection moved to global bar)
+        # 1. Top Row: Metrics (recording moved to global bar)
         self.top_row_layout = QHBoxLayout()
         self.top_row_layout.setSpacing(8)
 
-        # 1.1 Recording Tile
-        self.rec_tile = self._create_recording_tile()
-        self.top_row_layout.addWidget(self.rec_tile)
-
-        # 1.2 Metrics Panel
+        # 1.1 Metrics Panel
         self.metrics_panel = MetricsPanel()
         self.top_row_layout.addWidget(self.metrics_panel)
 
@@ -157,16 +165,37 @@ class MainWindow(QMainWindow):
         self.control_panel.setpoint_update.disconnect()
         self.control_panel.setpoint_update.connect(self._on_setpoint_change)
 
-        # OpenCV -> Ball position (TODO: implement UART sending later)
-        self.opencv_panel.ball_position_update.connect(self._on_ball_position_update)
+        # OpenCV -> STM32: Wysyłanie pozycji piłeczki i kąta belki
+        self.opencv_panel.ball_on_beam_update.connect(self._on_vision_ball_update)
+        self.opencv_panel.beam_angle_update.connect(self._on_vision_angle_update)
+
+        # Przechowywanie ostatnich danych z wizji
+        self._vision_ball_pos_mm = -1.0
+        self._vision_beam_angle = 0.0
+
+        # Timer do wysyłania danych wizyjnych (30 Hz)
+        self.vision_send_timer = QTimer()
+        self.vision_send_timer.timeout.connect(self._send_vision_data_to_stm)
+        self.vision_send_timer.start(33)  # ~30 FPS
 
     def _on_setpoint_change(self, val):
         self.serial.send_setpoint(val)
 
-    def _on_ball_position_update(self, x, y):
-        """Handler for ball position updates from OpenCV
-        TODO: Implement UART sending to STM later"""
-        pass  # Placeholder for future UART implementation
+    def _on_vision_ball_update(self, position_ratio: float):
+        """Handler dla aktualizacji pozycji piłeczki z OpenCV (0.0-1.0 lub -1 jeśli nie wykryta)"""
+        if position_ratio >= 0:
+            self._vision_ball_pos_mm = position_ratio * 250.0  # Konwersja na mm (0-250)
+        else:
+            self._vision_ball_pos_mm = -1.0  # Piłeczka nie wykryta
+
+    def _on_vision_angle_update(self, angle_deg: float):
+        """Handler dla aktualizacji kąta belki z OpenCV (w stopniach)"""
+        self._vision_beam_angle = angle_deg
+
+    def _send_vision_data_to_stm(self):
+        """Wysyła dane z wizji do STM32 przez UART (30 Hz)"""
+        if self._vision_ball_pos_mm >= 0:
+            self.serial.send_vision_data(self._vision_ball_pos_mm, self._vision_beam_angle)
 
     def _create_connection_tile(self):
         tile = QWidget()
@@ -260,6 +289,92 @@ class MainWindow(QMainWindow):
 
         return tile
 
+    def _create_sampling_tile(self):
+        tile = QFrame()
+        tile.setProperty("class", "card")
+        tile.setFixedHeight(50)
+        layout = QHBoxLayout(tile)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(5)
+
+        self.sampling_preset_btns = []
+        for ms in [10, 20, 30, 50, 100]:
+            btn = QPushButton(f"{ms}")
+            btn.setFixedSize(45, 28)
+            btn.setStyleSheet("QPushButton { background-color: #581c87; color: white; border: none; border-radius: 3px; font-size: 11px; font-weight: bold; }" "QPushButton:hover { background-color: #7e22ce; }")
+            btn.clicked.connect(lambda checked, v=ms: self._set_sampling_preset(v))
+            btn.setEnabled(False)
+            layout.addWidget(btn)
+            self.sampling_preset_btns.append(btn)
+
+        self.spin_sampling_custom = QSpinBox()
+        self.spin_sampling_custom.setRange(5, 500)
+        self.spin_sampling_custom.setValue(30)
+        self.spin_sampling_custom.setStyleSheet("background-color: #222; color: white; border: 1px solid #581c87; font-size: 10px;")
+        self.spin_sampling_custom.setFixedWidth(55)
+        layout.addWidget(self.spin_sampling_custom)
+
+        self.btn_sampling_send = QPushButton("OK")
+        self.btn_sampling_send.setFixedSize(32, 28)
+        self.btn_sampling_send.setStyleSheet("QPushButton { background-color: #7e22ce; color: white; border: none; border-radius: 3px; font-size: 10px; font-weight: bold; }" "QPushButton:hover { background-color: #9333ea; }")
+        self.btn_sampling_send.clicked.connect(self._send_custom_sampling)
+        self.btn_sampling_send.setEnabled(False)
+        layout.addWidget(self.btn_sampling_send)
+
+        return tile
+
+    def _send_custom_sampling(self):
+        ms = self.spin_sampling_custom.value()
+        self.serial.send_sampling_rate(ms)
+        self.terminal.append_tx(f"Próbkowanie: {ms} ms")
+
+    def _set_sampling_preset(self, ms):
+        self.serial.send_sampling_rate(ms)
+        self.terminal.append_tx(f"Próbkowanie: {ms} ms")
+
+    def _create_angle_tile(self):
+        tile = QFrame()
+        tile.setProperty("class", "card")
+        tile.setFixedHeight(50)
+        layout = QHBoxLayout(tile)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(5)
+
+        self.angle_preset_btns = []
+        for angle in [60, 80, 100, 120, 140]:
+            btn = QPushButton(str(angle))
+            btn.setFixedSize(45, 28)
+            btn.setStyleSheet("QPushButton { background-color: #334155; color: white; border: none; border-radius: 3px; font-size: 11px; font-weight: bold; }" "QPushButton:hover { background-color: #475569; }")
+            btn.clicked.connect(lambda checked, a=angle: self._set_angle_preset(a))
+            btn.setEnabled(False)
+            layout.addWidget(btn)
+            self.angle_preset_btns.append(btn)
+
+        self.spin_angle_custom = QSpinBox()
+        self.spin_angle_custom.setRange(0, 200)
+        self.spin_angle_custom.setValue(100)
+        self.spin_angle_custom.setStyleSheet("background-color: #222; color: white; border: 1px solid #475569; font-size: 10px;")
+        self.spin_angle_custom.setFixedWidth(55)
+        layout.addWidget(self.spin_angle_custom)
+
+        self.btn_angle_send = QPushButton("OK")
+        self.btn_angle_send.setFixedSize(32, 28)
+        self.btn_angle_send.setStyleSheet("QPushButton { background-color: #475569; color: white; border: none; border-radius: 3px; font-size: 10px; font-weight: bold; }" "QPushButton:hover { background-color: #64748b; }")
+        self.btn_angle_send.clicked.connect(self._send_custom_angle)
+        self.btn_angle_send.setEnabled(False)
+        layout.addWidget(self.btn_angle_send)
+
+        return tile
+
+    def _send_custom_angle(self):
+        angle = self.spin_angle_custom.value()
+        self.serial.send_command(f"L:{angle}")
+        self.terminal.append_tx(f"Kąt serwa: {angle}")
+
+    def _set_angle_preset(self, angle):
+        self.serial.send_command(f"L:{angle}")
+        self.terminal.append_tx(f"Kąt serwa: {angle}")
+
     def _create_csv_player_tab(self):
         """Create Tab 2: Test Runner with charts and export"""
         import pyqtgraph as pg
@@ -295,41 +410,8 @@ class MainWindow(QMainWindow):
         info_label.setWordWrap(True)
         left_layout.addWidget(info_label)
 
-        # --- Manual Angle Control ---
-        manual_frame = QFrame()
-        manual_frame.setStyleSheet("background-color: rgba(255,255,255,0.05); border-radius: 4px; padding: 5px;")
-        manual_layout = QHBoxLayout(manual_frame)
-        manual_layout.setContentsMargins(5, 5, 5, 5)
-
-        lbl_angle = QLabel("Kąt:")
-        lbl_angle.setStyleSheet("color: #ccc;")
-
-        self.spin_test_angle = QDoubleSpinBox()
-        self.spin_test_angle.setRange(0, 200)
-        self.spin_test_angle.setValue(100.0)
-        self.spin_test_angle.setSuffix(" °")
-        self.spin_test_angle.setStyleSheet("background-color: #222; color: white; border: 1px solid #444;")
-
-        self.btn_set_angle = QPushButton("Ustaw")
-        self.btn_set_angle.setFixedWidth(60)
-        self.btn_set_angle.setStyleSheet(
-            """
-            QPushButton { background-color: #64748b; color: white; border: none; border-radius: 3px; padding: 4px; }
-            QPushButton:hover { background-color: #475569; }
-            QPushButton:pressed { background-color: #334155; }
-        """
-        )
-        self.btn_set_angle.clicked.connect(self._set_manual_test_angle)
-        self.btn_set_angle.setEnabled(False)  # Disabled until connected
-
-        manual_layout.addWidget(lbl_angle)
-        manual_layout.addWidget(self.spin_test_angle)
-        manual_layout.addWidget(self.btn_set_angle)
-
-        left_layout.addWidget(manual_frame)
-
         # Center Servo Button
-        self.btn_center_servo = QPushButton("⬌ WYCENTRUJ BELKĘ")
+        self.btn_center_servo = QPushButton("WYCENTRUJ BELKE")
         self.btn_center_servo.setFixedHeight(35)
         self.btn_center_servo.setStyleSheet(
             """
@@ -377,7 +459,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.lbl_test_samples)
 
         # Export Button
-        self.btn_test_export = QPushButton("💾 EKSPORT CSV")
+        self.btn_test_export = QPushButton("EKSPORT CSV")
         self.btn_test_export.setFixedHeight(35)
         self.btn_test_export.setStyleSheet(
             """
@@ -396,7 +478,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.btn_test_export)
 
         # Clear Button
-        self.btn_test_clear = QPushButton("🗑 WYCZYŚĆ")
+        self.btn_test_clear = QPushButton("WYCZYSC")
         self.btn_test_clear.setFixedHeight(30)
         self.btn_test_clear.setStyleSheet(
             """
@@ -428,43 +510,92 @@ class MainWindow(QMainWindow):
         self.serial.rx_log.connect(lambda msg, t: self.terminal_test.append_rx(msg, t))
         self.serial.tx_log.connect(self.terminal_test.append_tx)
 
-        # --- Right Panel: Charts ---
+        # --- Right Panel: Charts with Checkboxes ---
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
+        right_layout.setSpacing(5)
 
-        # Header
-        chart_header = QLabel("WYKRESY W CZASIE RZECZYWISTYM")
-        chart_header.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px; margin-left: 5px;")
-        right_layout.addWidget(chart_header)
+        # Header with checkboxes
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+
+        chart_header = QLabel("WYKRESY")
+        chart_header.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px;")
+        header_row.addWidget(chart_header)
+
+        # Checkboxes for chart visibility
+        self.chk_show_distance = QCheckBox("Odległość")
+        self.chk_show_distance.setChecked(True)
+        self.chk_show_distance.setStyleSheet("color: #22c55e; font-size: 10px;")
+        self.chk_show_distance.stateChanged.connect(self._update_test_chart_visibility)
+        header_row.addWidget(self.chk_show_distance)
+
+        self.chk_show_setpoint = QCheckBox("Setpoint")
+        self.chk_show_setpoint.setChecked(True)
+        self.chk_show_setpoint.setStyleSheet("color: #f39c12; font-size: 10px;")
+        self.chk_show_setpoint.stateChanged.connect(self._update_test_chart_visibility)
+        header_row.addWidget(self.chk_show_setpoint)
+
+        self.chk_show_error = QCheckBox("Uchyb")
+        self.chk_show_error.setChecked(True)
+        self.chk_show_error.setStyleSheet("color: #ef4444; font-size: 10px;")
+        self.chk_show_error.stateChanged.connect(self._update_test_chart_visibility)
+        header_row.addWidget(self.chk_show_error)
+
+        self.chk_show_control = QCheckBox("Sterowanie")
+        self.chk_show_control.setChecked(True)
+        self.chk_show_control.setStyleSheet("color: #3498db; font-size: 10px;")
+        self.chk_show_control.stateChanged.connect(self._update_test_chart_visibility)
+        header_row.addWidget(self.chk_show_control)
+
+        self.chk_show_beam = QCheckBox("Kąt belki")
+        self.chk_show_beam.setChecked(True)
+        self.chk_show_beam.setStyleSheet("color: #f59e0b; font-size: 10px;")
+        self.chk_show_beam.stateChanged.connect(self._update_test_chart_visibility)
+        header_row.addWidget(self.chk_show_beam)
+
+        header_row.addStretch()
+        right_layout.addLayout(header_row)
 
         # PyQtGraph setup
         pg.setConfigOption("background", "#1e293b")
         pg.setConfigOption("foreground", "#94a3b8")
         pg.setConfigOptions(antialias=True)
 
-        # Chart 1: Distance
+        # Chart 1: Distance & Setpoint (Main)
         self.csv_plot_dist = pg.PlotWidget()
         self.csv_plot_dist.showGrid(x=False, y=True, alpha=0.3)
         self.csv_plot_dist.setYRange(0, 260, padding=0)
         self.csv_plot_dist.setMouseEnabled(x=False, y=False)
-        self.csv_plot_dist.setTitle("Odległość [mm]", color="#94a3b8", size="10pt")
+        self.csv_plot_dist.setTitle("Odległość / Setpoint [mm]", color="#94a3b8", size="10pt")
 
-        self.csv_curve_dist = self.csv_plot_dist.plot(pen=pg.mkPen(color="#22c55e", width=2))
-        self.csv_curve_filt = self.csv_plot_dist.plot(pen=pg.mkPen(color="#3b82f6", width=2))
+        self.csv_curve_setpoint = self.csv_plot_dist.plot(pen=pg.mkPen(color="#f39c12", width=2, style=Qt.DashLine), name="Setpoint")
+        self.csv_curve_dist = self.csv_plot_dist.plot(pen=pg.mkPen(color="#22c55e", width=2, style=Qt.DotLine), name="Dystans")
+        self.csv_curve_filt = self.csv_plot_dist.plot(pen=pg.mkPen(color="#3b82f6", width=2), name="Filtrowany")
 
-        right_layout.addWidget(self.csv_plot_dist, stretch=1)
+        right_layout.addWidget(self.csv_plot_dist, stretch=2)
 
-        # Chart 2: Servo Angle
-        self.csv_plot_angle = pg.PlotWidget()
-        self.csv_plot_angle.showGrid(x=False, y=True, alpha=0.3)
-        self.csv_plot_angle.setMouseEnabled(x=False, y=True)
-        self.csv_plot_angle.setTitle("Kąt Serwa [°]", color="#94a3b8", size="10pt")
+        # Chart 2: Error
+        self.csv_plot_error = pg.PlotWidget()
+        self.csv_plot_error.showGrid(x=False, y=True, alpha=0.3)
+        self.csv_plot_error.setMouseEnabled(x=False, y=True)
+        self.csv_plot_error.setTitle("Uchyb Regulacji", color="#94a3b8", size="10pt")
 
-        self.csv_curve_angle = self.csv_plot_angle.plot(pen=pg.mkPen(color="#f39c12", width=2))
+        self.csv_curve_error = self.csv_plot_error.plot(pen=pg.mkPen(color="#ef4444", width=2), fillLevel=0, brush=(239, 68, 68, 50))
 
-        right_layout.addWidget(self.csv_plot_angle, stretch=1)
+        right_layout.addWidget(self.csv_plot_error, stretch=1)
+
+        # Chart 3: Control & Beam Angle
+        self.csv_plot_ctrl = pg.PlotWidget()
+        self.csv_plot_ctrl.showGrid(x=False, y=True, alpha=0.3)
+        self.csv_plot_ctrl.setMouseEnabled(x=False, y=True)
+        self.csv_plot_ctrl.setTitle("Sterowanie / Kąt Belki", color="#94a3b8", size="10pt")
+
+        self.csv_curve_ctrl = self.csv_plot_ctrl.plot(pen=pg.mkPen(color="#3498db", width=2), name="Sterowanie")
+        self.csv_curve_beam = self.csv_plot_ctrl.plot(pen=pg.mkPen(color="#f59e0b", width=2, style=Qt.DashLine), name="Kąt belki")
+
+        right_layout.addWidget(self.csv_plot_ctrl, stretch=1)
 
         # Add to splitter
         splitter.addWidget(left_widget)
@@ -476,9 +607,6 @@ class MainWindow(QMainWindow):
 
         self.tab_widget.addTab(self.csv_tab, "Test Identyfikacji")
 
-        # Test data state
-        self.test_recording = False
-        self.test_data = []
         # Test data state
         self.test_recording = False
         self.test_data = []
@@ -588,7 +716,7 @@ class MainWindow(QMainWindow):
         if filepath:
             try:
                 with open(filepath, "w", newline="", encoding="utf-8") as f:
-                    fieldnames = ["time", "distance", "filtered", "setpoint", "error", "control"]
+                    fieldnames = ["time", "distance", "filtered", "setpoint", "error", "control", "beam_angle"]
                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(self.recording_data)
@@ -697,9 +825,14 @@ class MainWindow(QMainWindow):
             self.serial.send_command("L:100.0")  # Center Servo (Angle)
 
             # Enable Test Tab controls
-            self.btn_set_angle.setEnabled(True)
             self.btn_center_servo.setEnabled(True)
             self.btn_test_start.setEnabled(True)
+            for btn in self.angle_preset_btns:
+                btn.setEnabled(True)
+            for btn in self.sampling_preset_btns:
+                btn.setEnabled(True)
+            self.btn_angle_send.setEnabled(True)
+            self.btn_sampling_send.setEnabled(True)
         else:
             self.btn_connect.setText("Połącz")
             self.btn_connect.setObjectName("connectBtn")
@@ -710,9 +843,14 @@ class MainWindow(QMainWindow):
             self.btn_connect.setStyle(self.btn_connect.style())
 
             # Disable Test Tab controls
-            self.btn_set_angle.setEnabled(False)
             self.btn_center_servo.setEnabled(False)
             self.btn_test_start.setEnabled(False)
+            for btn in self.angle_preset_btns:
+                btn.setEnabled(False)
+            for btn in self.sampling_preset_btns:
+                btn.setEnabled(False)
+            self.btn_angle_send.setEnabled(False)
+            self.btn_sampling_send.setEnabled(False)
 
     def _on_new_data(self, data):
         # Always append to history for charting
@@ -734,7 +872,15 @@ class MainWindow(QMainWindow):
                 self.recording_stm_start = stm_time_ms
             relative_time = (stm_time_ms - self.recording_stm_start) / 1000.0
 
-            record = {"time": round(relative_time, 4), "distance": data.get("distance", 0), "filtered": data.get("filtered", 0), "setpoint": data.get("setpoint", 0), "error": data.get("error", 0), "control": data.get("control", 0)}
+            record = {
+                "time": round(relative_time, 4),
+                "distance": data.get("distance", 0),
+                "filtered": data.get("filtered", 0),
+                "setpoint": data.get("setpoint", 0),
+                "error": data.get("error", 0),
+                "control": data.get("control", 0),
+                "beam_angle": data.get("beam_angle", 0),
+            }
             self.recording_data.append(record)
 
             # Update sample count in UI
@@ -751,7 +897,15 @@ class MainWindow(QMainWindow):
                 self.test_stm_start = stm_time_ms
             relative_time = (stm_time_ms - self.test_stm_start) / 1000.0
 
-            test_record = {"time": round(relative_time, 4), "distance": data.get("distance", 0), "filtered": data.get("filtered", 0), "control": data.get("control", 0), "setpoint": data.get("setpoint", 0)}
+            test_record = {
+                "time": round(relative_time, 4),
+                "distance": data.get("distance", 0),
+                "filtered": data.get("filtered", 0),
+                "setpoint": data.get("setpoint", 0),
+                "error": data.get("error", 0),
+                "control": data.get("control", 0),
+                "beam_angle": data.get("beam_angle", 0),
+            }
             self.test_data.append(test_record)
 
     def _update_ui_tick(self):
@@ -766,30 +920,55 @@ class MainWindow(QMainWindow):
         computed = calculate_metrics(self.data_history)
         self.metrics_panel.update_metrics(latest, computed)
 
-        # Charts
+        # Charts (main tab)
         self.charts_panel.update_charts(self.data_history)
 
-        # Update Test Identification tab charts if recording
-        if hasattr(self, "test_recording") and self.test_recording:
-            self._update_test_charts()
+        # Update Test Identification tab charts (always, not just when recording)
+        self._update_test_charts()
 
     def _update_test_charts(self):
         """Update charts on Test Identification tab"""
-        if not self.test_data:
+        if not self.data_history:
             return
 
-        view_data = self.test_data[-200:]
+        view_data = self.data_history[-200:]
 
         dists = [d.get("distance", 0) for d in view_data]
         filts = [d.get("filtered", 0) for d in view_data]
-        angles = [d.get("control", 0) for d in view_data]
+        sets = [d.get("setpoint", 0) for d in view_data]
+        errs = [d.get("error", 0) for d in view_data]
+        ctrls = [d.get("control", 0) for d in view_data]
+        beams = [d.get("beam_angle", 0) * 10 for d in view_data]  # Scale for visibility
 
+        # Update all curves
         self.csv_curve_dist.setData(dists)
         self.csv_curve_filt.setData(filts)
-        self.csv_curve_angle.setData(angles)
+        self.csv_curve_setpoint.setData(sets)
+        self.csv_curve_error.setData(errs)
+        self.csv_curve_ctrl.setData(ctrls)
+        self.csv_curve_beam.setData(beams)
 
-        # Update sample count
-        self.lbl_test_samples.setText(f"Próbki: {len(self.test_data)}")
+        # Update sample count if test is running
+        if self.test_recording:
+            self.lbl_test_samples.setText(f"Próbki: {len(self.test_data)}")
+
+    def _update_test_chart_visibility(self):
+        """Update chart visibility based on checkboxes"""
+        # Distance chart
+        self.csv_curve_dist.setVisible(self.chk_show_distance.isChecked())
+        self.csv_curve_filt.setVisible(self.chk_show_distance.isChecked())
+
+        # Setpoint
+        self.csv_curve_setpoint.setVisible(self.chk_show_setpoint.isChecked())
+
+        # Error chart
+        self.csv_plot_error.setVisible(self.chk_show_error.isChecked())
+
+        # Control chart
+        self.csv_curve_ctrl.setVisible(self.chk_show_control.isChecked())
+
+        # Beam angle
+        self.csv_curve_beam.setVisible(self.chk_show_beam.isChecked())
 
     def _start_identification_test(self):
         """Start/stop identification test recording"""
@@ -876,14 +1055,6 @@ class MainWindow(QMainWindow):
         self.led_red.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
         self.led_green.setStyleSheet("background-color: #1a3a1a; border-radius: 8px;")
 
-    def _set_manual_test_angle(self):
-        """Set manual servo angle and disable regulator"""
-        val = self.spin_test_angle.value()
-        self.serial.send_regulator_state(0)  # Disable regulator
-        QThread.msleep(100)  # Wait for STM32 to process R:0
-        self.serial.send_command(f"L:{val:.2f}")  # Set angle
-        self.terminal.append_rx(f"Ustawiono kąt: {val:.2f}° (Regulator OFF)", "info")
-
         # UI Sync
         self.regulator_running = False
         self.btn_regulator.setText("START")
@@ -917,7 +1088,7 @@ class MainWindow(QMainWindow):
         if filepath:
             try:
                 with open(filepath, "w", newline="", encoding="utf-8") as f:
-                    fieldnames = ["time", "distance", "filtered", "control", "setpoint"]
+                    fieldnames = ["time", "distance", "filtered", "setpoint", "error", "control", "beam_angle"]
                     writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(self.test_data)
@@ -936,7 +1107,10 @@ class MainWindow(QMainWindow):
         # Clear charts
         self.csv_curve_dist.setData([])
         self.csv_curve_filt.setData([])
-        self.csv_curve_angle.setData([])
+        self.csv_curve_setpoint.setData([])
+        self.csv_curve_error.setData([])
+        self.csv_curve_ctrl.setData([])
+        self.csv_curve_beam.setData([])
 
         self.lbl_test_samples.setText("Próbki: 0")
         self.lbl_test_status.setText("Status: Oczekiwanie")

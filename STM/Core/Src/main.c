@@ -40,8 +40,6 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-// ServoPID_Controller przeniesiony do servo_pid.h
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -69,7 +67,7 @@ __attribute__((at(0x2007c0a0))) ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT
 #elif defined ( __GNUC__ ) /* GNU Compiler */
 
 ETH_DMADescTypeDef DMARxDscrTab[ETH_RX_DESC_CNT] __attribute__((section(".RxDecripSection"))); /* Ethernet Rx DMA Descriptors */
-ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecripSection")));   /* Ethernet Tx DMA Descriptors */
+ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecripSection"))); /* Ethernet Tx DMA Descriptors */
 #endif
 
 ETH_TxPacketConfig TxConfig;
@@ -83,6 +81,8 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart3_rx;
+DMA_HandleTypeDef hdma_usart3_tx;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
@@ -92,11 +92,26 @@ osThreadId ControlTaskHandle;
 uint16_t distance;
 char msg[64];
 
-// Zmienne obsługi UART
+// --- DMA UART RX ---
+#define DMA_RX_BUFFER_SIZE 128
+uint8_t dma_rx_buffer[DMA_RX_BUFFER_SIZE];
+volatile uint16_t dma_rx_head = 0;  // Wskaźnik przetwarzania
+
+// Bufor na komendy/ramki
+uint8_t cmd_buffer[64];
+volatile uint8_t cmd_len = 0;
+volatile uint8_t cmd_received = 0;
+
+// Dane z systemu wizyjnego (Python)
+volatile float g_vision_ball_pos = 125.0f;   // Pozycja piłeczki [mm] z OpenCV
+volatile float g_vision_beam_angle = 0.0f;   // Kąt belki [stopnie] z OpenCV
+volatile uint8_t g_vision_data_valid = 0;    // Flaga: czy dane są aktualne
+volatile uint32_t g_vision_last_update = 0;  // Timestamp ostatniej aktualizacji
+
+// Stare zmienne obsługi UART (do usunięcia po pełnej migracji)
 uint8_t rx_byte;
 uint8_t rx_buffer[64];
 volatile uint8_t rx_idx = 0;
-volatile uint8_t cmd_received = 0;
 
 // Główne zmienne sterujące
 volatile float g_setpoint = 125.0f; // Domyślnie środek belki
@@ -152,19 +167,23 @@ volatile float g_manual_servo_angle = SERVO_CENTER;
 volatile uint8_t g_test_running = 0;
 volatile uint32_t g_test_index = 0;
 
+// Sampling period (ms) - can be changed via UART command T:xx
+volatile uint32_t g_pid_dt_ms = PID_DT_MS;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
-void StartDefaultTask(void const * argument);
-void StartControlTask(void const * argument);
+void StartDefaultTask(void const *argument);
+void StartControlTask(void const *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -175,22 +194,103 @@ void SetServoAngle(float angle);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	if (huart->Instance == USART3) {
-		if (cmd_received == 0) {
-			if (rx_byte == '\n' || rx_byte == '\r') {
-				rx_buffer[rx_idx] = '\0';
-				if (rx_idx > 0)
+
+// --- Funkcje DMA UART (bez przerwań na każdy bajt) ---
+// Parsowanie ramki wizyjnej: "V:125.5;B:2.3;C:XX\n"
+// V = pozycja piłeczki [mm], B = kąt belki [stopnie], C = CRC8
+void ParseVisionFrame(const char *frame) {
+	float ball_pos = -1.0f;
+	float beam_angle = 0.0f;
+	uint8_t crc_received = 0;
+	int crc_found = 0;
+
+	// Znajdź CRC na końcu
+	const char *crc_ptr = strstr(frame, ";C:");
+	if (crc_ptr != NULL) {
+		crc_received = (uint8_t) strtol(crc_ptr + 3, NULL, 16);
+		crc_found = 1;
+	}
+
+	// Parsuj pola
+	const char *ptr = frame;
+	while (*ptr) {
+		if (ptr[0] == 'V' && ptr[1] == ':') {
+			ball_pos = atof(ptr + 2);
+		} else if (ptr[0] == 'B' && ptr[1] == ':') {
+			beam_angle = atof(ptr + 2);
+		}
+		// Przejdź do następnego pola
+		while (*ptr && *ptr != ';')
+			ptr++;
+		if (*ptr == ';')
+			ptr++;
+	}
+
+	// Weryfikacja CRC (opcjonalna - jeśli chcesz)
+	if (crc_found && ball_pos >= 0.0f) {
+		// Oblicz CRC z danych (bez ;C:XX)
+		int data_len = (crc_ptr != NULL) ? (int) (crc_ptr - frame) : strlen(frame);
+		uint8_t crc_calc = CalculateCRC8(frame, data_len);
+
+		if (crc_calc == crc_received) {
+			// Dane poprawne - zapisz
+			g_vision_ball_pos = ball_pos;
+			g_vision_beam_angle = beam_angle;
+			g_vision_data_valid = 1;
+			g_vision_last_update = HAL_GetTick();
+		}
+	} else if (ball_pos >= 0.0f) {
+		// Brak CRC ale dane wyglądają ok - zaakceptuj (dla testów)
+		g_vision_ball_pos = ball_pos;
+		g_vision_beam_angle = beam_angle;
+		g_vision_data_valid = 1;
+		g_vision_last_update = HAL_GetTick();
+	}
+}
+
+// Przetwarzanie bufora DMA - wywoływane w głównej pętli (polling)
+void ProcessDmaRxBuffer(void) {
+	// Pobierz aktualną pozycję DMA (ile bajtów pozostało do końca bufora)
+	uint16_t dma_tail = DMA_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart3_rx);
+
+	while (dma_rx_head != dma_tail) {
+		uint8_t byte = dma_rx_buffer[dma_rx_head];
+		dma_rx_head = (dma_rx_head + 1) % DMA_RX_BUFFER_SIZE;
+
+		if (byte == '\n' || byte == '\r') {
+			if (cmd_len > 0) {
+				cmd_buffer[cmd_len] = '\0';
+
+				// Sprawdź typ ramki
+				if (cmd_buffer[0] == 'V' && cmd_buffer[1] == ':') {
+					// Ramka z systemu wizyjnego
+					ParseVisionFrame((char*) cmd_buffer);
+				} else {
+					// Standardowa komenda (S:, P:, I:, D:, itd.)
+					memcpy(rx_buffer, cmd_buffer, cmd_len + 1);
 					cmd_received = 1;
-				rx_idx = 0;
-			} else {
-				if (rx_idx < 63) {
-					rx_buffer[rx_idx++] = rx_byte;
 				}
+				cmd_len = 0;
+			}
+		} else {
+			if (cmd_len < 63) {
+				cmd_buffer[cmd_len++] = byte;
 			}
 		}
-		HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
 	}
+}
+
+// Callback IDLE line (opcjonalny - dla wykrywania końca transmisji)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
+	if (huart->Instance == USART3) {
+		// Tutaj można przetworzyć dane gdy wykryto IDLE
+		// Ale my używamy polling w głównej pętli
+	}
+}
+
+// Stary callback - pozostawiony dla kompatybilności wstecznej
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	// Nie używany gdy DMA circular jest aktywne
 }
 
 void SetServoAngle(float angle) {
@@ -204,9 +304,7 @@ void SetServoAngle(float angle) {
 		angle = 200.0f;
 
 	uint32_t pulse_length = (uint32_t) (500.0f + (angle / 200.0f) * 2000.0f);
-	
 
-	
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_length);
 }
 
@@ -217,14 +315,14 @@ void SetServoAngleSmooth(float target_angle) {
 #ifdef SERVO_SLEW_RATE
 	float max_change = SERVO_SLEW_RATE * (PID_DT_MS / 1000.0f);
 	float diff = target_angle - g_current_hw_angle;
-	
+
 	if (diff > max_change) {
 		target_angle = g_current_hw_angle + max_change;
 	} else if (diff < -max_change) {
 		target_angle = g_current_hw_angle - max_change;
 	}
 #endif
-	
+
 	SetServoAngle(target_angle);
 	g_current_hw_angle = target_angle;
 }
@@ -232,500 +330,492 @@ void SetServoAngleSmooth(float target_angle) {
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
-int main(void)
-{
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
 
-  /* USER CODE BEGIN 1 */
+	/* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
+	/* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+	/* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* USER CODE BEGIN Init */
+	/* USER CODE BEGIN Init */
 	HAL_Delay(500); // Czekaj na ustabilizowanie zasilania czujników
-  /* USER CODE END Init */
+	/* USER CODE END Init */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
+	/* USER CODE BEGIN SysInit */
 
-  /* USER CODE END SysInit */
+	/* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_ETH_Init();
-  MX_USART3_UART_Init();
-  MX_USB_OTG_FS_PCD_Init();
-  MX_TIM3_Init();
-  MX_I2C1_Init();
-  MX_ADC1_Init();
-  /* USER CODE BEGIN 2 */
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_DMA_Init();
+	MX_ETH_Init();
+	MX_USART3_UART_Init();
+	MX_USB_OTG_FS_PCD_Init();
+	MX_TIM3_Init();
+	MX_I2C1_Init();
+	MX_ADC1_Init();
+	/* USER CODE BEGIN 2 */
 
 	// Initialization moved to StartControlTask
-  /* USER CODE END 2 */
+	/* USER CODE END 2 */
 
-  /* USER CODE BEGIN RTOS_MUTEX */
+	/* USER CODE BEGIN RTOS_MUTEX */
 	/* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
+	/* USER CODE END RTOS_MUTEX */
 
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
+	/* USER CODE BEGIN RTOS_SEMAPHORES */
 	/* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
+	/* USER CODE END RTOS_SEMAPHORES */
 
-  /* USER CODE BEGIN RTOS_TIMERS */
+	/* USER CODE BEGIN RTOS_TIMERS */
 	/* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
+	/* USER CODE END RTOS_TIMERS */
 
-  /* USER CODE BEGIN RTOS_QUEUES */
+	/* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
+	/* USER CODE END RTOS_QUEUES */
 
-  /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 256);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+	/* Create the thread(s) */
+	/* definition and creation of defaultTask */
+	osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 256);
+	defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
-  /* definition and creation of ControlTask */
-  osThreadDef(ControlTask, StartControlTask, osPriorityHigh, 0, 1024);
-  ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
+	/* definition and creation of ControlTask */
+	osThreadDef(ControlTask, StartControlTask, osPriorityHigh, 0, 1024);
+	ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
 
-  /* USER CODE BEGIN RTOS_THREADS */
+	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
-  /* USER CODE END RTOS_THREADS */
+	/* USER CODE END RTOS_THREADS */
 
-  /* Start scheduler */
-  osKernelStart();
+	/* Start scheduler */
+	osKernelStart();
 
-  /* We should never get here as control is now taken by the scheduler */
+	/* We should never get here as control is now taken by the scheduler */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
 	/* USER CODE BEGIN WHILE */
 	while (1) {
-    /* USER CODE END WHILE */
+		/* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
+		/* USER CODE BEGIN 3 */
 	}
-  /* USER CODE END 3 */
+	/* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
+	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
-  /** Configure LSE Drive Capability
-  */
-  HAL_PWR_EnableBkUpAccess();
+	/** Configure LSE Drive Capability
+	 */
+	HAL_PWR_EnableBkUpAccess();
 
-  /** Configure the main internal regulator output voltage
-  */
-  __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+	/** Configure the main internal regulator output voltage
+	 */
+	__HAL_RCC_PWR_CLK_ENABLE();
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 96;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
-  RCC_OscInitStruct.PLL.PLLR = 2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Initializes the RCC Oscillators according to the specified parameters
+	 * in the RCC_OscInitTypeDef structure.
+	 */
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+	RCC_OscInitStruct.PLL.PLLM = 4;
+	RCC_OscInitStruct.PLL.PLLN = 96;
+	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+	RCC_OscInitStruct.PLL.PLLQ = 4;
+	RCC_OscInitStruct.PLL.PLLR = 2;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Activate the Over-Drive mode
-  */
-  if (HAL_PWREx_EnableOverDrive() != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Activate the Over-Drive mode
+	 */
+	if (HAL_PWREx_EnableOverDrive() != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	/** Initializes the CPU, AHB and APB buses clocks
+	 */
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK) {
+		Error_Handler();
+	}
 }
 
 /**
-  * @brief ADC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ADC1_Init(void)
-{
+ * @brief ADC1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_ADC1_Init(void) {
 
-  /* USER CODE BEGIN ADC1_Init 0 */
+	/* USER CODE BEGIN ADC1_Init 0 */
 
-  /* USER CODE END ADC1_Init 0 */
+	/* USER CODE END ADC1_Init 0 */
 
-  ADC_ChannelConfTypeDef sConfig = {0};
+	ADC_ChannelConfTypeDef sConfig = { 0 };
 
-  /* USER CODE BEGIN ADC1_Init 1 */
+	/* USER CODE BEGIN ADC1_Init 1 */
 
-  /* USER CODE END ADC1_Init 1 */
+	/* USER CODE END ADC1_Init 1 */
 
-  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+	 */
+	hadc1.Instance = ADC1;
+	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+	hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+	hadc1.Init.ContinuousConvMode = DISABLE;
+	hadc1.Init.DiscontinuousConvMode = DISABLE;
+	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+	hadc1.Init.NbrOfConversion = 1;
+	hadc1.Init.DMAContinuousRequests = DISABLE;
+	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_0;
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN ADC1_Init 2 */
 
-  /* USER CODE END ADC1_Init 2 */
+	/* USER CODE END ADC1_Init 2 */
 
 }
 
 /**
-  * @brief ETH Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ETH_Init(void)
-{
+ * @brief ETH Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_ETH_Init(void) {
 
-  /* USER CODE BEGIN ETH_Init 0 */
+	/* USER CODE BEGIN ETH_Init 0 */
 
-  /* USER CODE END ETH_Init 0 */
+	/* USER CODE END ETH_Init 0 */
 
-   static uint8_t MACAddr[6];
+	static uint8_t MACAddr[6];
 
-  /* USER CODE BEGIN ETH_Init 1 */
+	/* USER CODE BEGIN ETH_Init 1 */
 
-  /* USER CODE END ETH_Init 1 */
-  heth.Instance = ETH;
-  MACAddr[0] = 0x00;
-  MACAddr[1] = 0x80;
-  MACAddr[2] = 0xE1;
-  MACAddr[3] = 0x00;
-  MACAddr[4] = 0x00;
-  MACAddr[5] = 0x00;
-  heth.Init.MACAddr = &MACAddr[0];
-  heth.Init.MediaInterface = HAL_ETH_RMII_MODE;
-  heth.Init.TxDesc = DMATxDscrTab;
-  heth.Init.RxDesc = DMARxDscrTab;
-  heth.Init.RxBuffLen = 1524;
+	/* USER CODE END ETH_Init 1 */
+	heth.Instance = ETH;
+	MACAddr[0] = 0x00;
+	MACAddr[1] = 0x80;
+	MACAddr[2] = 0xE1;
+	MACAddr[3] = 0x00;
+	MACAddr[4] = 0x00;
+	MACAddr[5] = 0x00;
+	heth.Init.MACAddr = &MACAddr[0];
+	heth.Init.MediaInterface = HAL_ETH_RMII_MODE;
+	heth.Init.TxDesc = DMATxDscrTab;
+	heth.Init.RxDesc = DMARxDscrTab;
+	heth.Init.RxBuffLen = 1524;
 
-  /* USER CODE BEGIN MACADDRESS */
+	/* USER CODE BEGIN MACADDRESS */
 
-  /* USER CODE END MACADDRESS */
+	/* USER CODE END MACADDRESS */
 
-  if (HAL_ETH_Init(&heth) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	if (HAL_ETH_Init(&heth) != HAL_OK) {
+		Error_Handler();
+	}
 
-  memset(&TxConfig, 0 , sizeof(ETH_TxPacketConfig));
-  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
-  TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
-  TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
-  /* USER CODE BEGIN ETH_Init 2 */
+	memset(&TxConfig, 0, sizeof(ETH_TxPacketConfig));
+	TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
+	TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
+	TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
+	/* USER CODE BEGIN ETH_Init 2 */
 
-  /* USER CODE END ETH_Init 2 */
+	/* USER CODE END ETH_Init 2 */
 
 }
 
 /**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
+ * @brief I2C1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_I2C1_Init(void) {
 
-  /* USER CODE BEGIN I2C1_Init 0 */
+	/* USER CODE BEGIN I2C1_Init 0 */
 
-  /* USER CODE END I2C1_Init 0 */
+	/* USER CODE END I2C1_Init 0 */
 
-  /* USER CODE BEGIN I2C1_Init 1 */
+	/* USER CODE BEGIN I2C1_Init 1 */
 
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x20303E5D;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/* USER CODE END I2C1_Init 1 */
+	hi2c1.Instance = I2C1;
+	hi2c1.Init.Timing = 0x20303E5D;
+	hi2c1.Init.OwnAddress1 = 0;
+	hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+	hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+	hi2c1.Init.OwnAddress2 = 0;
+	hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+	hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+	hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+	if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Configure Analogue filter
+	 */
+	if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
+	/** Configure Digital filter
+	 */
+	if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN I2C1_Init 2 */
 
-  /* USER CODE END I2C1_Init 2 */
+	/* USER CODE END I2C1_Init 2 */
 
 }
 
 /**
-  * @brief TIM3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM3_Init(void)
-{
+ * @brief TIM3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_TIM3_Init(void) {
 
-  /* USER CODE BEGIN TIM3_Init 0 */
+	/* USER CODE BEGIN TIM3_Init 0 */
 
-  /* USER CODE END TIM3_Init 0 */
+	/* USER CODE END TIM3_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
+	TIM_ClockConfigTypeDef sClockSourceConfig = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+	TIM_OC_InitTypeDef sConfigOC = { 0 };
 
-  /* USER CODE BEGIN TIM3_Init 1 */
+	/* USER CODE BEGIN TIM3_Init 1 */
 
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 95;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 19999;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
+	/* USER CODE END TIM3_Init 1 */
+	htim3.Instance = TIM3;
+	htim3.Init.Prescaler = 95;
+	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim3.Init.Period = 19999;
+	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+	if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
+		Error_Handler();
+	}
+	sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+	if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+		Error_Handler();
+	}
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK) {
+		Error_Handler();
+	}
+	sConfigOC.OCMode = TIM_OCMODE_PWM1;
+	sConfigOC.Pulse = 0;
+	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+	if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN TIM3_Init 2 */
 
-  /* USER CODE END TIM3_Init 2 */
-  HAL_TIM_MspPostInit(&htim3);
+	/* USER CODE END TIM3_Init 2 */
+	HAL_TIM_MspPostInit(&htim3);
 
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
+ * @brief USART3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART3_UART_Init(void) {
 
-  /* USER CODE BEGIN USART3_Init 0 */
+	/* USER CODE BEGIN USART3_Init 0 */
 
-  /* USER CODE END USART3_Init 0 */
+	/* USER CODE END USART3_Init 0 */
 
-  /* USER CODE BEGIN USART3_Init 1 */
+	/* USER CODE BEGIN USART3_Init 1 */
 
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
+	/* USER CODE END USART3_Init 1 */
+	huart3.Instance = USART3;
+	huart3.Init.BaudRate = 115200;
+	huart3.Init.WordLength = UART_WORDLENGTH_8B;
+	huart3.Init.StopBits = UART_STOPBITS_1;
+	huart3.Init.Parity = UART_PARITY_NONE;
+	huart3.Init.Mode = UART_MODE_TX_RX;
+	huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+	if (HAL_UART_Init(&huart3) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART3_Init 2 */
 
-  /* USER CODE END USART3_Init 2 */
+	/* USER CODE END USART3_Init 2 */
 
 }
 
 /**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
+ * @brief USB_OTG_FS Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USB_OTG_FS_PCD_Init(void) {
 
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
+	/* USER CODE BEGIN USB_OTG_FS_Init 0 */
 
-  /* USER CODE END USB_OTG_FS_Init 0 */
+	/* USER CODE END USB_OTG_FS_Init 0 */
 
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
+	/* USER CODE BEGIN USB_OTG_FS_Init 1 */
 
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
-  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
-  hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
-  hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
+	/* USER CODE END USB_OTG_FS_Init 1 */
+	hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
+	hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
+	hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
+	hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
+	hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
+	hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
+	hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
+	hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
+	hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
+	hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
+	if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USB_OTG_FS_Init 2 */
 
-  /* USER CODE END USB_OTG_FS_Init 2 */
+	/* USER CODE END USB_OTG_FS_Init 2 */
 
 }
 
 /**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
+ * Enable DMA controller clock
+ */
+static void MX_DMA_Init(void) {
 
-  /* USER CODE END MX_GPIO_Init_1 */
+	/* DMA controller clock enable */
+	__HAL_RCC_DMA1_CLK_ENABLE();
 
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOG_CLK_ENABLE();
+	/* DMA interrupt init */
+	/* DMA1_Stream1_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 5, 0);
+	HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+	/* DMA1_Stream3_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 5, 0);
+	HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin|LED_ERR_2_Pin|LED_ERR_3_Pin|LED_ERR_4_Pin
-                          |LED_ERR_5_Pin, GPIO_PIN_RESET);
+}
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
+/**
+ * @brief GPIO Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_GPIO_Init(void) {
+	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
+	/* USER CODE BEGIN MX_GPIO_Init_1 */
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+	/* USER CODE END MX_GPIO_Init_1 */
 
-  /*Configure GPIO pins : LED_ERR_1_Pin LED_ERR_2_Pin LED_ERR_3_Pin LED_ERR_4_Pin
-                           LED_ERR_5_Pin */
-  GPIO_InitStruct.Pin = LED_ERR_1_Pin|LED_ERR_2_Pin|LED_ERR_3_Pin|LED_ERR_4_Pin
-                          |LED_ERR_5_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+	/* GPIO Ports Clock Enable */
+	__HAL_RCC_GPIOE_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOH_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOD_CLK_ENABLE();
+	__HAL_RCC_GPIOG_CLK_ENABLE();
 
-  /*Configure GPIO pin : USER_Btn_Pin */
-  GPIO_InitStruct.Pin = USER_Btn_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOE, LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | LED_ERR_4_Pin | LED_ERR_5_Pin,
+			GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
-  GPIO_InitStruct.Pin = LD1_Pin|LD3_Pin|LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOB, LD1_Pin | LD3_Pin | LD2_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : CALIB_START_BTN_Pin CALIB_MID_BTN_Pin CALIB_END_BTN_Pin */
-  GPIO_InitStruct.Pin = CALIB_START_BTN_Pin|CALIB_MID_BTN_Pin|CALIB_END_BTN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : USB_PowerSwitchOn_Pin */
-  GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+	/*Configure GPIO pins : LED_ERR_1_Pin LED_ERR_2_Pin LED_ERR_3_Pin LED_ERR_4_Pin
+	 LED_ERR_5_Pin */
+	GPIO_InitStruct.Pin = LED_ERR_1_Pin | LED_ERR_2_Pin | LED_ERR_3_Pin | LED_ERR_4_Pin | LED_ERR_5_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : USB_OverCurrent_Pin */
-  GPIO_InitStruct.Pin = USB_OverCurrent_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+	/*Configure GPIO pin : USER_Btn_Pin */
+	GPIO_InitStruct.Pin = USER_Btn_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
+	/*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
+	GPIO_InitStruct.Pin = LD1_Pin | LD3_Pin | LD2_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* USER CODE END MX_GPIO_Init_2 */
+	/*Configure GPIO pins : CALIB_START_BTN_Pin CALIB_MID_BTN_Pin CALIB_END_BTN_Pin */
+	GPIO_InitStruct.Pin = CALIB_START_BTN_Pin | CALIB_MID_BTN_Pin | CALIB_END_BTN_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_PULLUP;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : USB_PowerSwitchOn_Pin */
+	GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : USB_OverCurrent_Pin */
+	GPIO_InitStruct.Pin = USB_OverCurrent_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+
+	/* USER CODE BEGIN MX_GPIO_Init_2 */
+
+	/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -739,11 +829,19 @@ static void MX_GPIO_Init(void)
  * @retval None
  */
 /* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
-{
-  /* USER CODE BEGIN 5 */
+void StartDefaultTask(void const *argument) {
+	/* USER CODE BEGIN 5 */
+	// Poczekaj na inicjalizację DMA w ControlTask (min 2.2s)
+	osDelay(3000);
+	
+	HAL_UART_Transmit(&huart3, (uint8_t*) "[DEFAULT] Task started, DMA polling active\r\n", 44, 100);
+	
 	/* Infinite loop */
 	for (;;) {
+		// --- PRZETWARZANIE BUFORA DMA (polling) ---
+		// Przetwarzamy tutaj aby komendy (S:, P:, I:, D:) były obsługiwane
+		ProcessDmaRxBuffer();
+
 		// Obsługa komend UART (przeniesione z ControlTask)
 		if (cmd_received) {
 			if (rx_buffer[0] == 'S' && rx_buffer[1] == ':') {
@@ -769,12 +867,11 @@ void StartDefaultTask(void const * argument)
 			}
 			// Komendy Kalibracji
 			// Format: "CAL0:50.0,0.0" -> Punkt 0: Surowy=50.0, Rzeczywisty=0.0
-			else if (strncmp((char*)rx_buffer, "CAL:RESET", 9) == 0) {
+			else if (strncmp((char*) rx_buffer, "CAL:RESET", 9) == 0) {
 				Calibration_Init();
 				sprintf(msg, "[CAL] RESET DONE. Waiting for points...\r\n");
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-			}
-			else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
+			} else if (rx_buffer[0] == 'C' && rx_buffer[1] == 'A' && rx_buffer[2] == 'L') {
 				int cal_idx = rx_buffer[3] - '0'; // Indeks punktu
 				if (cal_idx >= 0 && cal_idx < 5) {
 					char *comma = strchr((char*) &rx_buffer[5], ',');
@@ -806,7 +903,7 @@ void StartDefaultTask(void const * argument)
 			} else if (rx_buffer[0] == 'M' && rx_buffer[1] == ':') {
 				// M:0 -> GUI, M:1 -> Potencjometr, M:2 -> Sinus
 				control_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				const char* mode_names[] = {"GUI", "ANALOG", "SINUS"};
+				const char *mode_names[] = { "GUI", "ANALOG", "SINUS" };
 				if (control_mode <= 2) {
 					sprintf(msg, "MODE: %s\r\n", mode_names[control_mode]);
 					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
@@ -816,29 +913,44 @@ void StartDefaultTask(void const * argument)
 				g_regulator_enabled = (uint8_t) atoi((char*) &rx_buffer[2]);
 				sprintf(msg, "REG: %s\r\n", g_regulator_enabled ? "ON" : "OFF");
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-				
+
 				// Jeśli wyłączony - ustaw serwo na środek
 				if (!g_regulator_enabled) {
 					// SetServoAngle(SERVO_CENTER); // USUNIĘTE: Teraz używamy g_manual_servo_angle
 				}
+			} else if (rx_buffer[0] == 'T' && rx_buffer[1] == ':') {
+				// T:xx -> Zmiana okresu próbkowania (ms)
+				uint32_t new_dt = (uint32_t) atoi((char*) &rx_buffer[2]);
+				if (new_dt >= 5 && new_dt <= 500) {
+					g_pid_dt_ms = new_dt;
+					g_pid_needs_reinit = 1; // PID needs recalculation with new dt
+					sprintf(msg, "DT: %lu ms (%.1f Hz)\r\n", g_pid_dt_ms, 1000.0f / g_pid_dt_ms);
+					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+				} else {
+					sprintf(msg, "DT ERR: must be 5-500ms\r\n");
+					HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+				}
 			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == ':') {
 				// L:Angle -> Ustawienie kąta w trybie otwartym (gdy R:0)
 				g_manual_servo_angle = atof((char*) &rx_buffer[2]);
-				if (g_manual_servo_angle < 0.0f) g_manual_servo_angle = 0.0f;
-				if (g_manual_servo_angle > 200.0f) g_manual_servo_angle = 200.0f;
-				if (g_manual_servo_angle < 0.0f) g_manual_servo_angle = 0.0f;
-				if (g_manual_servo_angle > 200.0f) g_manual_servo_angle = 200.0f;
-				
+				if (g_manual_servo_angle < 0.0f)
+					g_manual_servo_angle = 0.0f;
+				if (g_manual_servo_angle > 200.0f)
+					g_manual_servo_angle = 200.0f;
+
+				// NATYCHMIAST ustaw serwo (bez czekania na główną pętlę)
+				SetServoAngle(g_manual_servo_angle);
+
 				// Send ACK for debugging
 				sprintf(msg, "L-ACK: %.2f\r\n", g_manual_servo_angle);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10);
-			} else if (strncmp((char*)rx_buffer, "TEST:START", 10) == 0) {
+			} else if (strncmp((char*) rx_buffer, "TEST:START", 10) == 0) {
 				g_test_index = 0;
 				g_test_running = 1;
 				g_regulator_enabled = 0; // Wyłącz regulator PID
-				sprintf(msg, "[TEST] STARTED. Len=%d\r\n", (int)SEQUENCE_LEN);
+				sprintf(msg, "[TEST] STARTED. Len=%d\r\n", (int) SEQUENCE_LEN);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-			} else if (strncmp((char*)rx_buffer, "TEST:STOP", 9) == 0) {
+			} else if (strncmp((char*) rx_buffer, "TEST:STOP", 9) == 0) {
 				g_test_running = 0;
 				SetServoAngle(SERVO_CENTER);
 				sprintf(msg, "[TEST] STOPPED.\r\n");
@@ -853,7 +965,7 @@ void StartDefaultTask(void const * argument)
 
 		osDelay(5); // 5ms - wystarczająco szybko dla UART
 	}
-  /* USER CODE END 5 */
+	/* USER CODE END 5 */
 }
 
 /* USER CODE BEGIN Header_StartControlTask */
@@ -863,9 +975,8 @@ void StartDefaultTask(void const * argument)
  * @retval None
  */
 /* USER CODE END Header_StartControlTask */
-void StartControlTask(void const * argument)
-{
-  /* USER CODE BEGIN StartControlTask */
+void StartControlTask(void const *argument) {
+	/* USER CODE BEGIN StartControlTask */
 	// Uruchomienie PWM dla serwa (Timer 3, Kanał 1)
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
@@ -881,53 +992,30 @@ void StartControlTask(void const * argument)
 	osDelay(200);
 	HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_RESET);
 
-	// Inicjalizacja czujnika odległości VL53L0X
-	statInfo_t_VL53L0X distanceStr;
-	osDelay(100);
+	// --- INICJALIZACJA DMA UART RX (Circular) ---
+	// Uruchomienie odbioru DMA w trybie ciągłym (bez przerwań na każdy bajt)
+	HAL_UART_Receive_DMA(&huart3, dma_rx_buffer, DMA_RX_BUFFER_SIZE);
+	// Wyłącz przerwania Half Transfer i Transfer Complete - będziemy pollować
+	__HAL_DMA_DISABLE_IT(&hdma_usart3_rx, DMA_IT_HT);
+	__HAL_DMA_DISABLE_IT(&hdma_usart3_rx, DMA_IT_TC);
 
-	HAL_UART_Transmit(&huart3, (uint8_t*) "Resetting VL53L0X...\r\n", 21, 100);
-
-	uint8_t reset_val = 0x00;
-	HAL_I2C_Mem_Write(&hi2c1, ADDRESS_DEFAULT, 0x00BF, 1, &reset_val, 1, 100);
-	osDelay(50); // Czas na reset
-
-	HAL_UART_Transmit(&huart3, (uint8_t*) "Initializing VL53L0X...\r\n", 25, 100);
-	if (!initVL53L0X(1, &hi2c1)) {
-		HAL_UART_Transmit(&huart3, (uint8_t*) "VL53L0X Init Failed!\r\n", 22, 100);
-	} else {
-		HAL_UART_Transmit(&huart3, (uint8_t*) "VL53L0X Init Success!\r\n", 23, 100);
-	}
-
-	startContinuous(0);
-
-	HAL_UART_Transmit(&huart3, (uint8_t*) "VL53L0X Ready! Sending data...\r\n", 32, 100);
+	HAL_UART_Transmit(&huart3, (uint8_t*) "[VISION] DMA UART initialized\r\n", 31, 100);
+	HAL_UART_Transmit(&huart3, (uint8_t*) "[VISION] Waiting for Python data...\r\n", 37, 100);
+	HAL_UART_Transmit(&huart3, (uint8_t*) "[VISION] Format: V:pos_mm;B:angle_deg;C:CRC\\n\r\n", 47, 100);
 
 	Calibration_Init();
 
-	HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
-
 	uint32_t loop_counter = 0;
 
-	// Inicjalizacja filtrów
-	OneEuroFilter_t one_euro;
-	OneEuro_Init(&one_euro, 2.0f, 0.001f, 1.0f);
-
-	MedianFilter_t median_filter;
-	MedianFilter_Init(&median_filter);
-
-	// Lekki filtr EMA dla czujnika (Alpha mniejsze = mocniejsze filtrowanie)
-	EMA_Filter_t dist_ema;
-	EMA_Init(&dist_ema, 0.5f);
-
-	// Start ADC nie jest potrzebny tutaj w trybie Single, będziemy startować w pętli
-	// HAL_ADC_Start(&hadc1);
+	// Filtry TOF już niepotrzebne - dane z wizji są wstępnie filtrowane w Pythonie
+	// (usunięto: OneEuroFilter, MedianFilter, EMA_Filter)
 
 	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
 	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
 
 	// Inicjalizacja kontrolera ServoPID (nasza implementacja) - domyślny
 	ServoPID_Init(&g_servo_pid);
-	
+
 	// Ustaw serwo na pozycję środkową przy starcie
 	SetServoAngle(SERVO_CENTER);
 
@@ -936,12 +1024,16 @@ void StartControlTask(void const * argument)
 	static float last_servo_angle = SERVO_CENTER;
 
 	// Inicjalizacja bufora błędu
-	for(int i=0; i<AVG_ERR_SAMPLES; i++) err_buffer[i] = 0.0f;
+	for (int i = 0; i < AVG_ERR_SAMPLES; i++)
+		err_buffer[i] = 0.0f;
 
 	/* Infinite loop */
 	for (;;) {
 		loop_counter++;
-		
+
+		// ProcessDmaRxBuffer wywołany w StartDefaultTask (tam obsługa komend)
+		// Tutaj tylko odczytujemy dane wizyjne z volatile zmiennych
+
 		// Aktualizacja wzmocnień PID (bez resetu stanu - zachowuje pozycję serwa)
 		if (g_pid_needs_reinit) {
 			PID_UpdateGains(&g_pid_ctrl, g_Kp, g_Ki, g_Kd);
@@ -950,111 +1042,72 @@ void StartControlTask(void const * argument)
 
 		// Obsługa komend UART przeniesiona do StartDefaultTask
 
-		// Odczyt dystansu w trybie continuous
-		distance = readRangeContinuousMillimeters(&distanceStr);
+		// --- ODCZYT POZYCJI PIŁECZKI Z SYSTEMU WIZYJNEGO ---
+		// Sprawdzenie czy dane z wizji są aktualne (timeout 200ms)
+		uint8_t vision_timeout = (HAL_GetTick() - g_vision_last_update) > 200;
+
+		float vision_ball_pos;
+		float vision_beam_angle;
+
+		if (g_vision_data_valid && !vision_timeout) {
+			// Użyj danych z wizji
+			vision_ball_pos = g_vision_ball_pos;
+			vision_beam_angle = g_vision_beam_angle;
+			distance = (uint16_t) vision_ball_pos;
+		} else {
+			// Brak danych - użyj ostatniej znanej wartości
+			vision_ball_pos = prev_valid_dist;
+			vision_beam_angle = 0.0f;
+			distance = (uint16_t) prev_valid_dist;
+		}
 
 		// --- Obsługa Potencjometru ---
 		// Wyzwalanie ręczne (Single Mode)
 		HAL_ADC_Start(&hadc1); // Start konwersji
 		if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
 			g_adc_raw = HAL_ADC_GetValue(&hadc1);
-			float pot_setpoint = (float)g_adc_raw * 0.070818f; 
-			g_pot_setpoint = pot_setpoint; 
-			
+			float pot_setpoint = (float) g_adc_raw * 0.070818f;
+			g_pot_setpoint = pot_setpoint;
+
 			// Jeśli tryb Analog, nadpisz setpoint
 			if (control_mode == 1) {
 				// Lekki filtr na setpoint z potencjometru, żeby nie skakał
 				static float pot_ema = 0.0f;
 				// Inicjuj przy pierwszym użyciu
-				if (pot_ema == 0.0f) pot_ema = pot_setpoint;
-				
+				if (pot_ema == 0.0f)
+					pot_ema = pot_setpoint;
+
 				pot_ema = 0.1f * pot_setpoint + 0.9f * pot_ema;
 				g_setpoint = pot_ema;
 			}
 		}
 		// HAL_ADC_Stop nie jest konieczne w Single Mode (sam się zatrzymuje po EOC), ale dobre dla porządku
 		HAL_ADC_Stop(&hadc1);
-		
+
 		// Tryb Sinus - generowanie sinusoidalnego setpointu
 		if (control_mode == 2) {
 			// Parametry sinusa: okres 5s, amplituda 50mm, centrum 125mm
-			float t = (float)HAL_GetTick() / 1000.0f; // czas w sekundach
+			float t = (float) HAL_GetTick() / 1000.0f; // czas w sekundach
 			float period = 5.0f;      // okres w sekundach
 			float amplitude = 50.0f;   // amplituda w mm
 			float center = 125.0f;     // środek w mm
-			
+
 			g_setpoint = center + amplitude * sinf(2.0f * 3.14159f * t / period);
 		}
 
-		if (distance >= 8190) {
-			// 8190/8191 = Hardware error / Out of range
-			distance = (uint16_t) prev_valid_dist;
-		} else {
-			// Accept the measurement even if Status != 0
-			prev_valid_dist = (float) distance;
+		// --- Walidacja danych z wizji ---
+		if (vision_ball_pos >= 0.0f && vision_ball_pos <= 300.0f) {
+			prev_valid_dist = vision_ball_pos;
 		}
+		// Jeśli dane nieprawidłowe - zachowaj poprzednią wartość
 
-		// Filtracja Medianowa (usuwanie szpilek z surowego odczytu)
-		float dist_median = MedianFilter_Apply(&median_filter, (float) distance);
+		// --- UPROSZCZONA FILTRACJA DLA DANYCH Z WIZJI ---
+		// Dane z OpenCV są już filtrowane, wystarczy lekki EMA
+		static float filtered_vision = 125.0f;
+		float alpha_vision = 0.7f;  // Szybka reakcja (dane z wizji są stabilniejsze)
+		filtered_vision = alpha_vision * prev_valid_dist + (1.0f - alpha_vision) * filtered_vision;
 
-		// --- HYBRYDOWY ŁAŃCUCH FILTRÓW (z projektu testowego) ---
-		// 1. Rate Limiter (Odsiewanie szpilek)
-		// 2. Adaptive EMA (Dynamiczne wygładzanie)
-		// 3. Deadband (Stabilizacja wyniku na końcu)
-
-		#define NOISE_THRESHOLD 0.5   // Ignoruj zmiany < 2mm (jitter)
-		#define MAX_JUMP 30         // Ignoruj zmiany > 20mm (błędy/szpilki)
-
-		static uint16_t last_valid_raw = 125;
-		static float filtered_ema = 125.0f;
-		static uint16_t final_output = 125;
-		static int invalid_count = 0;
-
-		int valid_update = 0; // Flaga czy mamy nową wartość do filtra
-
-		if (dist_median < 2000) {
-			int diff = (int)dist_median - (int)last_valid_raw;
-			if (diff < 0) diff = -diff; // abs
-
-			// 1. Rate Limiter
-			if (diff <= MAX_JUMP) {
-				last_valid_raw = (uint16_t)dist_median;
-				invalid_count = 0;
-				valid_update = 1;
-			} else {
-				invalid_count++;
-				if (invalid_count > 5) { // Watchdog odblokowujący
-					last_valid_raw = (uint16_t)dist_median;
-					invalid_count = 0;
-					valid_update = 1;
-				}
-			}
-		}
-
-		if (valid_update) {
-			// 2. Adaptive EMA
-			float raw_diff = (float)last_valid_raw - filtered_ema;
-			if (raw_diff < 0) raw_diff = -raw_diff;
-
-			float alpha;
-			if (raw_diff < 10.0f) alpha = 0.5f;      // Silne wygładzanie (stabilność)
-			else if (raw_diff > 20.0f) alpha = 0.8f;  // Szybka reakcja
-			else alpha = 0.15f + ((raw_diff - 5.0f) / 15.0f) * 0.65f; // Interpolacja
-
-			filtered_ema = (alpha * (float)last_valid_raw) + ((1.0f - alpha) * filtered_ema);
-
-			// 3. Deadband (na wyjściu EMA)
-			int out_diff = (int)filtered_ema - (int)final_output;
-			if (out_diff < 0) out_diff = -out_diff;
-
-			if (out_diff > NOISE_THRESHOLD) {
-				final_output = (uint16_t)filtered_ema;
-			}
-		}
-		// else: błąd sensora -> trzymamy starą wartość
-
-		// Nadpisz prev_valid_dist dla kompatybilności z resztą kodu
-		prev_valid_dist = (float)final_output;
+		uint16_t final_output = (uint16_t) filtered_vision;
 
 		// --- TEST ID SEQUENCE ---
 		if (g_test_running) {
@@ -1062,29 +1115,23 @@ void StartControlTask(void const * argument)
 				uint16_t pwm_val = pwm_sequence[g_test_index];
 				// Set PWM directly
 				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm_val);
-				
+
 				// Calculate angle for telemetry (approximation)
-				float test_angle = ((float)pwm_val - 500.0f) * 200.0f / 2000.0f; 
+				float test_angle = ((float) pwm_val - 500.0f) * 200.0f / 2000.0f;
 				last_servo_angle = test_angle;
 
-				// Prepare telemetry variables (raw vs calibrated)
+				// Prepare telemetry variables
 				uint16_t dist_display = distance;
-				uint16_t filt_display = (uint16_t)final_output;
-#if USE_CALIBRATION
-				if (Calibration_IsReady()) {
-					dist_display = (uint16_t) Calibration_Interpolate((float)distance);
-					filt_display = (uint16_t) Calibration_Interpolate((float)final_output);
-				}
-#endif
-				
-				char data_buffer[80];
-				int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:0;V:0;S:%d",
-						HAL_GetTick(), (int)dist_display, (int)g_setpoint, (int)test_angle, (int)filt_display,
-						distanceStr.rangeStatus);
+				uint16_t filt_display = final_output;
+
+				char data_buffer[96];
+				int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:0;V:0;B:%d", HAL_GetTick(),
+						(int) dist_display, (int) g_setpoint, (int) test_angle, (int) filt_display,
+						(int) (vision_beam_angle * 100));  // B: kąt belki * 100 (dla precyzji)
 				uint8_t out_crc = CalculateCRC8(data_buffer, len);
 				sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10);
-				
+
 				g_test_index++;
 			} else {
 				// End of sequence
@@ -1093,7 +1140,7 @@ void StartControlTask(void const * argument)
 				HAL_UART_Transmit(&huart3, (uint8_t*) "TEST:FINISHED\r\n", 15, 100);
 			}
 			HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
-			osDelay(PID_DT_MS); // Maintain constant sampling rate!
+			osDelay(g_pid_dt_ms); // Maintain constant sampling rate!
 			continue;
 		}
 
@@ -1102,93 +1149,43 @@ void StartControlTask(void const * argument)
 			// Regulator wyłączony - sterowanie manualne / otwarte
 			SetServoAngleSmooth(g_manual_servo_angle);
 			last_servo_angle = g_current_hw_angle; // Update for telemetry
-			
-			// Jeśli kalibracja gotowa, użyj skalibrowanych; jeśli nie - surowych
-			uint16_t dist_display = distance;
-			uint16_t filt_display = (uint16_t)final_output;
-			
-#if USE_CALIBRATION
-			if (Calibration_IsReady()) {
-				dist_display = (uint16_t) Calibration_Interpolate((float)distance);
-				filt_display = (uint16_t) Calibration_Interpolate((float)final_output);
-			}
-#endif
 
-			char data_buffer[80];
-			int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:0;V:0;S:%d",
-					HAL_GetTick(), (int)dist_display, (int)g_setpoint, (int)last_servo_angle, (int)filt_display,
-					distanceStr.rangeStatus);
+			// Telemetria - dane z wizji
+			uint16_t dist_display = distance;
+			uint16_t filt_display = final_output;
+
+			char data_buffer[96];
+			int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:0;V:0;B:%d", HAL_GetTick(), (int) dist_display,
+					(int) g_setpoint, (int) last_servo_angle, (int) filt_display, (int) (vision_beam_angle * 100)); // B: kąt belki * 100
 			uint8_t out_crc = CalculateCRC8(data_buffer, len);
 			sprintf(msg, "%s;C:%02X\r\n", data_buffer, out_crc);
 			HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10);
-			
+
 			HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
-			osDelay(PID_DT_MS);
+			osDelay(g_pid_dt_ms);
 			continue; // Pomiń PID i sterowanie serwem
 		}
 
-		if (!Calibration_IsReady()) {
-			// Keep sending status message every 2 seconds
-			static uint32_t last_cal_msg = 0;
-			if (HAL_GetTick() - last_cal_msg > 2000) {
-				sprintf(msg, "[WAITING] Calibration needed (%d/5 points)\r\n",
-						__builtin_popcount(Calibration_GetReceivedPointsMask()));
-				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
-				last_cal_msg = HAL_GetTick();
-			}
+		// --- Dane z wizji nie wymagają kalibracji czujnika TOF ---
+		// Kalibracja OpenCV odbywa się po stronie Pythona
 
-			static uint8_t cal_throttle = 0;
-			cal_throttle++;
-
-			if (cal_throttle >= 2) { // Send every 2nd loop (~20ms)
-				cal_throttle = 0;
-
-				char cal_buffer[64];
-				int cal_len = sprintf(cal_buffer, "D:%d;A:0;F:%d;E:0;S:%d", (int) dist_median, (int) final_output,
-						distanceStr.rangeStatus);
-				uint8_t cal_crc = CalculateCRC8(cal_buffer, cal_len);
-				sprintf(msg, "%s;C:%02X\r\n", cal_buffer, cal_crc);
-				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10);
-			}
-
-			HAL_GPIO_TogglePin(GPIOB, LD2_Pin);
-			osDelay(10);
-			continue; // Skip PID and servo control
-		}
-
-#if USE_CALIBRATION
-		// D: = surowy odczyt po kalibracji (przed filtrem Adaptive EMA)
-		float raw_calibrated = Calibration_Interpolate((float)distance);
-		// F: = po Adaptive EMA i po kalibracji
-		float dist_calibrated = Calibration_Interpolate(prev_valid_dist);
-#else
-		float raw_calibrated = (float)distance;
-		float dist_calibrated = prev_valid_dist;
-#endif
-
-		// filtered_dist = po filtrze i kalibracji
-		float filtered_dist = dist_calibrated;
-
-		uint16_t raw_distance = (uint16_t)raw_calibrated;  // D: surowy po kalibracji
-		distance = (uint16_t) dist_calibrated;
-
-
-
-
+		// filtered_dist = pozycja piłeczki z wizji (już przefiltrowana)
+		float filtered_dist = (float) final_output;
 
 		float current_error = g_setpoint - filtered_dist;
 		float pid_error = current_error;
 
 		// --- Obliczanie Średniego Błędu (Rolling Average) ---
 		float current_abs_err = (current_error < 0) ? -current_error : current_error;
-		
+
 		err_sum -= err_buffer[err_idx];       // Odejmij najstarszą próbkę
 		err_buffer[err_idx] = current_abs_err; // Zapisz nową
 		err_sum += current_abs_err;           // Dodaj nową
-		
+
 		err_idx++;
-		if(err_idx >= AVG_ERR_SAMPLES) err_idx = 0;
-		
+		if (err_idx >= AVG_ERR_SAMPLES)
+			err_idx = 0;
+
 		float avg_error = err_sum / AVG_ERR_SAMPLES;
 
 		// Strefa nieczułości dla uchybu (stabilizacja w punkcie równowagi)
@@ -1209,21 +1206,21 @@ void StartControlTask(void const * argument)
 		float pid_angle = pid_output;  // Wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
 		g_current_error = current_error; // Przekaż błąd do defaultTask (wizualizacja LED)
 		// UpdateErrorLEDs_5LED przeniesione do StartDefaultTask
-		
+
 		// --- Feedforward dla trybu Sinus ---
 		// Analityczna pochodna: d(setpoint)/dt = amplitude * (2π/period) * cos(2π*t/period)
 		if (control_mode == 2) {
-			float t = (float)HAL_GetTick() / 1000.0f;
+			float t = (float) HAL_GetTick() / 1000.0f;
 			float period = 5.0f;
 			float amplitude = 50.0f;
 			float omega = 2.0f * 3.14159f / period;  // częstotliwość kątowa
-			
+
 			float setpoint_derivative = amplitude * omega * cosf(omega * t);
-			
+
 			// Kff - współczynnik feedforward (do dostrojenia)
 			float Kff = 0.2f;
 			float feedforward = Kff * setpoint_derivative;
-			
+
 			// Dodaj feedforward do wyjścia PID
 			pid_angle += feedforward;
 		}
@@ -1243,13 +1240,18 @@ void StartControlTask(void const * argument)
 		// Slew Rate Limiter handled by SetServoAngleSmooth
 		SetServoAngleSmooth(pid_angle);
 		last_servo_angle = g_current_hw_angle;
-		
+
 		volatile float smoothed_angle = last_servo_angle; // Alias for compatibility
 
-		char data_buffer[80];
-		// T:Time; D:Dist (raw); A:Angle; F:Filtered; E:Error; V:AvgError; S:Status; Z:Setpoint
-		int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:%d;V:%d;S:%d", HAL_GetTick(), (int)raw_distance, (int)g_setpoint, (int)smoothed_angle, (int) filtered_dist,
-				(int) current_error, (int) avg_error, distanceStr.rangeStatus);
+		char data_buffer[96];
+		// T:Time; D:Dist (raw); Z:Setpoint; A:Angle; F:Filtered; E:Error; V:AvgError; B:BeamAngle*100
+		int len = sprintf(data_buffer, "T:%lu;D:%d;Z:%d;A:%d;F:%d;E:%d;V:%d;B:%d", HAL_GetTick(), (int) distance, // D: pozycja piłeczki z wizji (raw)
+				(int) g_setpoint,         // Z: setpoint
+				(int) smoothed_angle,     // A: kąt serwa
+				(int) filtered_dist,      // F: pozycja przefiltrowana
+				(int) current_error,      // E: błąd
+				(int) avg_error,          // V: średni błąd
+				(int) (vision_beam_angle * 100));  // B: kąt belki z wizji * 100
 
 		uint8_t out_crc = CalculateCRC8(data_buffer, len);
 
@@ -1260,45 +1262,42 @@ void StartControlTask(void const * argument)
 			HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 10); // Timeout 10ms
 		}
 
-		osDelay(PID_DT_MS); // Loop delay
+		osDelay(g_pid_dt_ms); // Loop delay
 	}
-  /* USER CODE END StartControlTask */
+	/* USER CODE END StartControlTask */
 }
 
 /**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM1 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim : TIM handle
-  * @retval None
-  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
+ * @brief  Period elapsed callback in non blocking mode
+ * @note   This function is called  when TIM1 interrupt took place, inside
+ * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+ * a global variable "uwTick" used as application time base.
+ * @param  htim : TIM handle
+ * @retval None
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	/* USER CODE BEGIN Callback 0 */
 
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM1)
-  {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
+	/* USER CODE END Callback 0 */
+	if (htim->Instance == TIM1) {
+		HAL_IncTick();
+	}
+	/* USER CODE BEGIN Callback 1 */
 
-  /* USER CODE END Callback 1 */
+	/* USER CODE END Callback 1 */
 }
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
+	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1) {
 	}
-  /* USER CODE END Error_Handler_Debug */
+	/* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**

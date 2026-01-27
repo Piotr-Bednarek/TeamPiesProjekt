@@ -1,13 +1,13 @@
 {
     "ball_detection": {
-        "h_min": 15,
-        "h_max": 56,
-        "s_min": 76,
-        "s_max": 141,
-        "v_min": 107,
-        "v_max": 255,
+        "h_min": 18,
+        "h_max": 31,
+        "s_min": 18,
+        "s_max": 125,
+        "v_min": 105,
+        "v_max": 161,
         "blur_size": 21,
-        "min_area": 1000
+        "min_area": 1743
     },
     "aruco_detection": {
         "adaptive_const": 30,
@@ -15,7 +15,13 @@
         "min_area": 0,
         "brightness": -48,
         "contrast": 3.0,
-        "gamma": 0.65
+        "gamma": 0.43,
+        "error_correction": 0.6,
+        "corner_refine": true,
+        "upscale_enabled": true,
+        "upscale_factor": 1.5,
+        "sharpen_enabled": true,
+        "apriltag_refine": true
     },
     "calibration": {
         "min": 0.0,
