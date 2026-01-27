@@ -125,6 +125,17 @@ class OpenCVPanel(QWidget):
         cam_group = QGroupBox("Sterowanie kamerą")
         cam_layout = QHBoxLayout(cam_group)
 
+        # Camera selection combo box
+        cam_layout.addWidget(QLabel("Kamera:"))
+        self.camera_selector = QComboBox()
+        self.camera_selector.addItem("Auto (USB priorytet)", -1)
+        self.camera_selector.addItem("Kamera 0 (Wbudowana)", 0)
+        self.camera_selector.addItem("Kamera 1 (USB)", 1)
+        self.camera_selector.addItem("Kamera 2", 2)
+        self.camera_selector.setFixedWidth(180)
+        self.camera_selector.setCurrentIndex(1)  # Default to Camera 1 (USB)
+        cam_layout.addWidget(self.camera_selector)
+
         self.btn_start_camera = QPushButton("Start Camera")
         self.btn_start_camera.setFixedHeight(32)
         self.btn_start_camera.clicked.connect(self._toggle_camera)
@@ -932,6 +943,22 @@ class OpenCVPanel(QWidget):
 
     def _find_camera(self):
         """Find and initialize the camera with caching for faster reconnection"""
+        # Get user's camera selection
+        selected_camera = self.camera_selector.currentData()
+        
+        # If specific camera is selected (not Auto)
+        if selected_camera >= 0:
+            for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF]:
+                cap = self._try_open_camera(selected_camera, backend)
+                if cap is not None:
+                    self._last_camera_index = selected_camera
+                    self._last_camera_backend = backend
+                    self._log_global(f"Użyto wybranej kamery: indeks {selected_camera}", "info")
+                    return cap
+            self._log_global(f"Nie można otworzyć kamery o indeksie {selected_camera}", "error")
+            return None
+        
+        # Auto mode: prioritize USB camera (index 1) over built-in (index 0)
         # Try cached settings first (fastest path)
         if self._last_camera_index is not None:
             cap = self._try_open_camera(self._last_camera_index, self._last_camera_backend)
@@ -941,7 +968,7 @@ class OpenCVPanel(QWidget):
             self._last_camera_index = None
             self._last_camera_backend = None
 
-        # Scan for camera: prioritize DSHOW (faster for DirectShow cameras like PS3 Eye)
+        # Scan for camera: prioritize USB (1) over built-in (0)
         for i in [1, 0, 2]:
             for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF]:
                 cap = self._try_open_camera(i, backend)
@@ -949,6 +976,7 @@ class OpenCVPanel(QWidget):
                     # Cache working settings
                     self._last_camera_index = i
                     self._last_camera_backend = backend
+                    self._log_global(f"Auto: znaleziono kamerę o indeksie {i}", "info")
                     return cap
         return None
 
