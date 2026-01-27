@@ -1085,6 +1085,7 @@ class OpenCVPanel(QWidget):
                     # Cache working settings
                     self._last_camera_index = i
                     self._last_camera_backend = backend
+                    self._log_global(f"Auto: znaleziono kamerę o indeksie {i}", "info")
                     return cap
         return None
 
