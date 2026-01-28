@@ -1258,13 +1258,15 @@ class OpenCVPanel(QWidget):
             # Standard detection without upscaling
             corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
 
-        # Filter markers by minimum area
+        # Filter markers by minimum area and allowed IDs
+        allowed_ids = {0, 1, 2, 3}  # Szukaj tylko markerów o ID 0, 1, 2, 3
         filtered_corners = []
         filtered_ids = []
         if ids is not None and len(ids) > 0:
             for i, marker_id in enumerate(ids):
+                # Sprawdzam zarówno obszar jak i czy ID jest na liście dozwolonych
                 area = cv2.contourArea(corners[i])
-                if area >= self.aruco_min_area:
+                if area >= self.aruco_min_area and marker_id[0] in allowed_ids:
                     filtered_corners.append(corners[i])
                     filtered_ids.append(marker_id)
 

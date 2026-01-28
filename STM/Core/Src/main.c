@@ -32,6 +32,7 @@
 #include "calibration.h"
 #include "pid.h"
 #include "servo_pid.h"
+#include "lqr.h"
 #include "crc8.h"
 #include "leds.h"
 
@@ -148,7 +149,12 @@ volatile uint8_t g_pid_needs_reinit = 0;
 // Kontroler ServoPID (nasza implementacja) - domyślny
 ServoPID_Controller g_servo_pid;
 
-// Tryb PID: 0 = Custom (servo_pid, domyślny), 1 = CMSIS DSP
+// Kontroler LQR
+LQR_Controller_t g_lqr_ctrl;
+volatile float g_K1 = 31.65f;  // LQR gain dla pozycji
+volatile float g_K2 = 3.16f;   // LQR gain dla prędkości
+
+// Tryb regulacji: 0 = Custom PID (servo_pid, domyślny), 1 = LQR
 volatile uint8_t g_pid_mode = 0;
 
 // Debugging
@@ -859,10 +865,23 @@ void StartDefaultTask(void const *argument) {
 			} else if (rx_buffer[0] == 'D' && rx_buffer[1] == ':') {
 				g_Kd = atof((char*) &rx_buffer[2]);
 				g_pid_needs_reinit = 1;
+			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == '1' && rx_buffer[2] == ':') {
+				// LQR K1 gain (pozycja)
+				g_K1 = atof((char*) &rx_buffer[3]);
+				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2);
+				sprintf(msg, "LQR K1: %.2f\r\n", g_K1);
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == '2' && rx_buffer[2] == ':') {
+				// LQR K2 gain (prędkość)
+				g_K2 = atof((char*) &rx_buffer[3]);
+				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2);
+				sprintf(msg, "LQR K2: %.2f\r\n", g_K2);
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
-				// Przełączanie trybu regulatora: 0 = Custom (servo_pid), 1 = CMSIS DSP
+				// Przełączanie trybu regulatora: 0 = Custom PID, 1 = LQR
 				g_pid_mode = (uint8_t) atoi((char*) &rx_buffer[2]);
-				sprintf(msg, "PID MODE: %s\r\n", g_pid_mode == 0 ? "CUSTOM" : "CMSIS");
+				const char *mode_name = (g_pid_mode == 0) ? "CUSTOM PID" : "LQR";
+				sprintf(msg, "CONTROLLER MODE: %s\r\n", mode_name);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 			}
 			// Komendy Kalibracji
@@ -1012,6 +1031,9 @@ void StartControlTask(void const *argument) {
 
 	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
 	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
+
+	// Inicjalizacja kontrolera LQR
+	LQR_Init(&g_lqr_ctrl, g_K1, g_K2, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
 
 	// Inicjalizacja kontrolera ServoPID (nasza implementacja) - domyślny
 	ServoPID_Init(&g_servo_pid);
@@ -1193,15 +1215,20 @@ void StartControlTask(void const *argument) {
 			pid_error = 0.0f;
 		}
 
-		// Warunkowe obliczenie PID - wybór implementacji
+		// Warunkowe obliczenie regulatora - wybór implementacji
 		float pid_output;
 		if (g_pid_mode == 0) {
 			// Custom PID (servo_pid.c) - domyślny
 			float error = g_setpoint - filtered_dist;
 			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
+		} else if (g_pid_mode == 1) {
+			// LQR Controller
+			float dt = 0.01f;  // 10ms próbkowanie (100Hz)
+			pid_output = LQR_Compute(&g_lqr_ctrl, g_setpoint, filtered_dist, dt);
 		} else {
-			// CMSIS DSP PID
-			pid_output = PID_Compute(&g_pid_ctrl, g_setpoint, filtered_dist);
+			// Fallback do Custom PID
+			float error = g_setpoint - filtered_dist;
+			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
 		}
 		float pid_angle = pid_output;  // Wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
 		g_current_error = current_error; // Przekaż błąd do defaultTask (wizualizacja LED)
