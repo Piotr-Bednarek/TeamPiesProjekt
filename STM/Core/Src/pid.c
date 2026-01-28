@@ -25,9 +25,9 @@
  * @param max_out Górny limit wyjścia.
  */
 void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd, float min_out, float max_out) {
-    pid->mode = PID_MODE_STANDARD; // Domyślnie standardowy
-    pid->prev_meas = 125.0f; // Inicjalizacja na środek belki (domyślny setpoint)
-    pid->Kd_user = Kd; // Zapamiętaj oryginalne Kd
+    pid->mode = PID_MODE_STANDARD;
+    pid->prev_meas = 125.0f;
+    pid->Kd_user = Kd;
 
     pid->instance.Kp = Kp;
     pid->instance.Ki = Ki;
@@ -35,8 +35,6 @@ void PID_Init(PID_Controller_t *pid, float Kp, float Ki, float Kd, float min_out
     
     arm_pid_init_f32(&pid->instance, 1);
     
-    // Inicjalizacja filtra błędu z wartością 0 (brak początkowego błędu)
-    // to zapobiega skokowi wyjścia przy pierwszym obliczeniu
     EMA_Init(&pid->error_filter, 0.8f);
     pid->error_filter.filtered_value = 0.0f;
     pid->error_filter.initialized = 1;

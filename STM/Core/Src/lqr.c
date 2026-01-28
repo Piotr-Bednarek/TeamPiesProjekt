@@ -50,9 +50,7 @@ float LQR_Compute(LQR_Controller_t *lqr, float setpoint, float measured, float b
     
     float theta = beam_angle;
     
-    // Prawo sterowania: u = K1*error - K2*velocity - K3*theta
-    // K1, K2, K3 są  z obliczeń LQR
-    
+    // u = K1*error - K2*velocity - K3*theta
     float control_rad = lqr->K1 * position_error_m 
                         - lqr->K2 * velocity_m 
                         - lqr->K3 * theta;

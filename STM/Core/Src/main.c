@@ -115,7 +115,7 @@ uint8_t rx_buffer[64];
 volatile uint8_t rx_idx = 0;
 
 // Główne zmienne sterujące
-volatile float g_setpoint = 125.0f; // Domyślnie środek belki
+volatile float g_setpoint = 125.0f;
 volatile float g_Kp = 0.44f;
 volatile float g_Ki = 0.0053f;
 volatile float g_Kd = 5.0f;
@@ -233,9 +233,7 @@ void ParseVisionFrame(const char *frame) {
 			ptr++;
 	}
 
-	// Weryfikacja CRC (opcjonalna - jeśli chcesz)
 	if (crc_found && ball_pos >= 0.0f) {
-		// Oblicz CRC z danych (bez ;C:XX)
 		int data_len = (crc_ptr != NULL) ? (int) (crc_ptr - frame) : strlen(frame);
 		uint8_t crc_calc = CalculateCRC8(frame, data_len);
 
@@ -290,20 +288,13 @@ void ProcessDmaRxBuffer(void) {
 // Callback IDLE line (opcjonalny - dla wykrywania końca transmisji)
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 	if (huart->Instance == USART3) {
-		// Tutaj można przetworzyć dane gdy wykryto IDLE
-		// Ale my używamy polling w głównej pętli
 	}
 }
 
-// Stary callback - pozostawiony dla kompatybilności wstecznej
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	// Nie używany gdy DMA circular jest aktywne
 }
 
 void SetServoAngle(float angle) {
-	// Sterowanie serwem SG90/MG996R:
-	// 0 stopni = impuls ~500us
-	// 180 stopni  = impuls ~2500us
 
 	if (angle < 0.0f)
 		angle = 0.0f;
@@ -1017,15 +1008,11 @@ void StartControlTask(void const *argument) {
 	HAL_UART_Transmit(&huart3, (uint8_t*) "Setting Servo to CENTER\r\n", 25, 100);
 	SetServoAngle(SERVO_CENTER); // Ustaw serwo na środek (100 stopni)
 
-	// Test led
 	HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_SET);
 	osDelay(200);
 	HAL_GPIO_WritePin(GPIOB, LD1_Pin, GPIO_PIN_RESET);
 
-	// --- INICJALIZACJA DMA UART RX (Circular) ---
-	// Uruchomienie odbioru DMA w trybie ciągłym (bez przerwań na każdy bajt)
 	HAL_UART_Receive_DMA(&huart3, dma_rx_buffer, DMA_RX_BUFFER_SIZE);
-	// Wyłącz przerwania Half Transfer i Transfer Complete - będziemy pollować
 	__HAL_DMA_DISABLE_IT(&hdma_usart3_rx, DMA_IT_HT);
 	__HAL_DMA_DISABLE_IT(&hdma_usart3_rx, DMA_IT_TC);
 
@@ -1037,26 +1024,16 @@ void StartControlTask(void const *argument) {
 
 	uint32_t loop_counter = 0;
 
-	// Filtry TOF już niepotrzebne - dane z wizji są wstępnie filtrowane w Pythonie
-	// (usunięto: OneEuroFilter, MedianFilter, EMA_Filter)
-
-	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
 	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
-
-	// Inicjalizacja kontrolera LQR (model 3-stanowy)
 	LQR_Init(&g_lqr_ctrl, g_K1, g_K2, g_K3, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
-
-	// Inicjalizacja kontrolera ServoPID (nasza implementacja) - domyślny
 	ServoPID_Init(&g_servo_pid);
 
 	// Ustaw serwo na pozycję środkową przy starcie
 	SetServoAngle(SERVO_CENTER);
 
-	// Zmiennej pomocniczej prev_valid_dist
 	float prev_valid_dist = 145.0f;
 	static float last_servo_angle = SERVO_CENTER;
 
-	// Inicjalizacja bufora błędu
 	for (int i = 0; i < AVG_ERR_SAMPLES; i++)
 		err_buffer[i] = 0.0f;
 
@@ -1075,20 +1052,16 @@ void StartControlTask(void const *argument) {
 
 		// Obsługa komend UART przeniesiona do StartDefaultTask
 
-		// --- ODCZYT POZYCJI PIŁECZKI Z SYSTEMU WIZYJNEGO ---
-		// Sprawdzenie czy dane z wizji są aktualne (timeout 200ms)
 		uint8_t vision_timeout = (HAL_GetTick() - g_vision_last_update) > 200;
 
 		float vision_ball_pos;
 		float vision_beam_angle;
 
 		if (g_vision_data_valid && !vision_timeout) {
-			// Użyj danych z wizji
 			vision_ball_pos = g_vision_ball_pos;
 			vision_beam_angle = g_vision_beam_angle;
 			distance = (uint16_t) vision_ball_pos;
 		} else {
-			// Brak danych - użyj ostatniej znanej wartości
 			vision_ball_pos = prev_valid_dist;
 			vision_beam_angle = 0.0f;
 			distance = (uint16_t) prev_valid_dist;
@@ -1102,11 +1075,8 @@ void StartControlTask(void const *argument) {
 			float pot_setpoint = (float) g_adc_raw * 0.070818f;
 			g_pot_setpoint = pot_setpoint;
 
-			// Jeśli tryb Analog, nadpisz setpoint
 			if (control_mode == 1) {
-				// Lekki filtr na setpoint z potencjometru, żeby nie skakał
 				static float pot_ema = 0.0f;
-				// Inicjuj przy pierwszym użyciu
 				if (pot_ema == 0.0f)
 					pot_ema = pot_setpoint;
 
@@ -1114,30 +1084,23 @@ void StartControlTask(void const *argument) {
 				g_setpoint = pot_ema;
 			}
 		}
-		// HAL_ADC_Stop nie jest konieczne w Single Mode (sam się zatrzymuje po EOC), ale dobre dla porządku
 		HAL_ADC_Stop(&hadc1);
 
-		// Tryb Sinus - generowanie sinusoidalnego setpointu
 		if (control_mode == 2) {
-			// Parametry sinusa: okres 5s, amplituda 50mm, centrum 125mm
-			float t = (float) HAL_GetTick() / 1000.0f; // czas w sekundach
-			float period = 5.0f;      // okres w sekundach
-			float amplitude = 50.0f;   // amplituda w mm
-			float center = 125.0f;     // środek w mm
+			float t = (float) HAL_GetTick() / 1000.0f;
+			float period = 5.0f;
+			float amplitude = 50.0f;
+			float center = 125.0f;
 
 			g_setpoint = center + amplitude * sinf(2.0f * 3.14159f * t / period);
 		}
 
-		// --- Walidacja danych z wizji ---
 		if (vision_ball_pos >= 0.0f && vision_ball_pos <= 300.0f) {
 			prev_valid_dist = vision_ball_pos;
 		}
-		// Jeśli dane nieprawidłowe - zachowaj poprzednią wartość
 
-		// --- UPROSZCZONA FILTRACJA DLA DANYCH Z WIZJI ---
-		// Dane z OpenCV są już filtrowane, wystarczy lekki EMA
 		static float filtered_vision = 125.0f;
-		float alpha_vision = 0.7f;  // Szybka reakcja (dane z wizji są stabilniejsze)
+		float alpha_vision = 0.7f;
 		filtered_vision = alpha_vision * prev_valid_dist + (1.0f - alpha_vision) * filtered_vision;
 
 		uint16_t final_output = (uint16_t) filtered_vision;
@@ -1181,7 +1144,7 @@ void StartControlTask(void const *argument) {
 		if (!g_regulator_enabled) {
 			// Regulator wyłączony - sterowanie manualne / otwarte
 			SetServoAngleSmooth(g_manual_servo_angle);
-			last_servo_angle = g_current_hw_angle; // Update for telemetry
+			last_servo_angle = g_current_hw_angle;
 
 			// Telemetria - dane z wizji
 			uint16_t dist_display = distance;
@@ -1211,9 +1174,9 @@ void StartControlTask(void const *argument) {
 		// --- Obliczanie Średniego Błędu (Rolling Average) ---
 		float current_abs_err = (current_error < 0) ? -current_error : current_error;
 
-		err_sum -= err_buffer[err_idx];       // Odejmij najstarszą próbkę
-		err_buffer[err_idx] = current_abs_err; // Zapisz nową
-		err_sum += current_abs_err;           // Dodaj nową
+		err_sum -= err_buffer[err_idx];
+		err_buffer[err_idx] = current_abs_err;
+		err_sum += current_abs_err;
 
 		err_idx++;
 		if (err_idx >= AVG_ERR_SAMPLES)
@@ -1229,23 +1192,18 @@ void StartControlTask(void const *argument) {
 		// Warunkowe obliczenie regulatora - wybór implementacji
 		float pid_output;
 		if (g_pid_mode == 0) {
-			// Custom PID (servo_pid.c) - domyślny
 			float error = g_setpoint - filtered_dist;
 			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
 		} else if (g_pid_mode == 1) {
-			// LQR Controller (model 3-stanowy: pozycja, prędkość, kąt belki)
-			float dt = 0.01f;  // 10ms próbkowanie (100Hz)
-			// Przelicz kąt belki na radiany (vision_beam_angle jest w stopniach)
+			float dt = 0.01f;
 			float beam_angle_rad = vision_beam_angle * (3.14159f / 180.0f);
 			pid_output = LQR_Compute(&g_lqr_ctrl, g_setpoint, filtered_dist, beam_angle_rad, dt);
 		} else {
-			// Fallback do Custom PID
 			float error = g_setpoint - filtered_dist;
 			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
 		}
-		float pid_angle = pid_output;  // Wartość w zakresie [SERVO_MIN_LIMIT, SERVO_MAX_LIMIT]
-		g_current_error = current_error; // Przekaż błąd do defaultTask (wizualizacja LED)
-		// UpdateErrorLEDs_5LED przeniesione do StartDefaultTask
+		float pid_angle = pid_output;
+		g_current_error = current_error;
 
 		// --- Feedforward dla trybu Sinus ---
 		// Analityczna pochodna: d(setpoint)/dt = amplitude * (2π/period) * cos(2π*t/period)
@@ -1260,8 +1218,6 @@ void StartControlTask(void const *argument) {
 			// Kff - współczynnik feedforward (do dostrojenia)
 			float Kff = 0.2f;
 			float feedforward = Kff * setpoint_derivative;
-
-			// Dodaj feedforward do wyjścia PID
 			pid_angle += feedforward;
 		}
 
@@ -1280,8 +1236,7 @@ void StartControlTask(void const *argument) {
 		// Slew Rate Limiter handled by SetServoAngleSmooth
 		SetServoAngleSmooth(pid_angle);
 		last_servo_angle = g_current_hw_angle;
-
-		volatile float smoothed_angle = last_servo_angle; // Alias for compatibility
+		volatile float smoothed_angle = last_servo_angle;
 
 		char data_buffer[96];
 		// T:Time; D:Dist (raw); Z:Setpoint; A:Angle; F:Filtered; E:Error; V:AvgError; B:BeamAngle*100
