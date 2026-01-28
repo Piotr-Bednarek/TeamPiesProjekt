@@ -142,6 +142,9 @@ class SerialManager(QObject):
     def send_lqr_k2(self, val):
         self.send_command(f"L2:{val:.2f}")
 
+    def send_lqr_k3(self, val):
+        self.send_command(f"L3:{val:.2f}")
+
     def send_calibration(self, index, raw, target):
         self.send_command(f"CAL{index}:{raw:.1f},{target:.1f}")
 

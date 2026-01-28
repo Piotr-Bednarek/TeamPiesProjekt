@@ -116,9 +116,9 @@ volatile uint8_t rx_idx = 0;
 
 // Główne zmienne sterujące
 volatile float g_setpoint = 125.0f; // Domyślnie środek belki
-volatile float g_Kp = 0.44f;       // Wzmocnienie proporcjonalne (dodatnie po obrocie serwa)
-volatile float g_Ki = 0.0053f;     // Wzmocnienie całkujące (dodatnie po obrocie serwa)
-volatile float g_Kd = 5.0f;        // Wzmocnienie różniczkujące (dodatnie po obrocie serwa)
+volatile float g_Kp = 0.44f;
+volatile float g_Ki = 0.0053f;
+volatile float g_Kd = 5.0f;
 
 // Zmienne kalibracji
 // volatile uint8_t calibration_mode = 0;
@@ -149,10 +149,11 @@ volatile uint8_t g_pid_needs_reinit = 0;
 // Kontroler ServoPID (nasza implementacja) - domyślny
 ServoPID_Controller g_servo_pid;
 
-// Kontroler LQR
+// Kontroler LQR (model 3-stanowy)
 LQR_Controller_t g_lqr_ctrl;
-volatile float g_K1 = 31.65f;  // LQR gain dla pozycji
-volatile float g_K2 = 3.16f;   // LQR gain dla prędkości
+volatile float g_K1 = 1.00f;
+volatile float g_K2 = 0.71f;
+volatile float g_K3 = 0.42f;
 
 // Tryb regulacji: 0 = Custom PID (servo_pid, domyślny), 1 = LQR
 volatile uint8_t g_pid_mode = 0;
@@ -318,9 +319,13 @@ void SetServoAngle(float angle) {
 static float g_current_hw_angle = SERVO_CENTER;
 
 void SetServoAngleSmooth(float target_angle) {
+	float diff = target_angle - g_current_hw_angle;
+	if (diff > -SERVO_ANGLE_DEADBAND && diff < SERVO_ANGLE_DEADBAND) {
+		return;  // Nie aktualizuj serwa przy zbyt małej zmianie
+	}
+
 #ifdef SERVO_SLEW_RATE
 	float max_change = SERVO_SLEW_RATE * (PID_DT_MS / 1000.0f);
-	float diff = target_angle - g_current_hw_angle;
 
 	if (diff > max_change) {
 		target_angle = g_current_hw_angle + max_change;
@@ -868,14 +873,20 @@ void StartDefaultTask(void const *argument) {
 			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == '1' && rx_buffer[2] == ':') {
 				// LQR K1 gain (pozycja)
 				g_K1 = atof((char*) &rx_buffer[3]);
-				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2);
+				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2, g_K3);
 				sprintf(msg, "LQR K1: %.2f\r\n", g_K1);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == '2' && rx_buffer[2] == ':') {
 				// LQR K2 gain (prędkość)
 				g_K2 = atof((char*) &rx_buffer[3]);
-				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2);
+				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2, g_K3);
 				sprintf(msg, "LQR K2: %.2f\r\n", g_K2);
+				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
+			} else if (rx_buffer[0] == 'L' && rx_buffer[1] == '3' && rx_buffer[2] == ':') {
+				// LQR K3 gain (kąt belki)
+				g_K3 = atof((char*) &rx_buffer[3]);
+				LQR_UpdateGains(&g_lqr_ctrl, g_K1, g_K2, g_K3);
+				sprintf(msg, "LQR K3: %.2f\r\n", g_K3);
 				HAL_UART_Transmit(&huart3, (uint8_t*) msg, strlen(msg), 100);
 			} else if (rx_buffer[0] == 'X' && rx_buffer[1] == ':') {
 				// Przełączanie trybu regulatora: 0 = Custom PID, 1 = LQR
@@ -1032,8 +1043,8 @@ void StartControlTask(void const *argument) {
 	// Inicjalizacja kontrolera PID (CMSIS DSP) - używa globalnego g_pid_ctrl
 	PID_Init(&g_pid_ctrl, g_Kp, g_Ki, g_Kd, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
 
-	// Inicjalizacja kontrolera LQR
-	LQR_Init(&g_lqr_ctrl, g_K1, g_K2, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
+	// Inicjalizacja kontrolera LQR (model 3-stanowy)
+	LQR_Init(&g_lqr_ctrl, g_K1, g_K2, g_K3, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
 
 	// Inicjalizacja kontrolera ServoPID (nasza implementacja) - domyślny
 	ServoPID_Init(&g_servo_pid);
@@ -1222,9 +1233,11 @@ void StartControlTask(void const *argument) {
 			float error = g_setpoint - filtered_dist;
 			pid_output = ServoPID_Compute(&g_servo_pid, error, filtered_dist);
 		} else if (g_pid_mode == 1) {
-			// LQR Controller
+			// LQR Controller (model 3-stanowy: pozycja, prędkość, kąt belki)
 			float dt = 0.01f;  // 10ms próbkowanie (100Hz)
-			pid_output = LQR_Compute(&g_lqr_ctrl, g_setpoint, filtered_dist, dt);
+			// Przelicz kąt belki na radiany (vision_beam_angle jest w stopniach)
+			float beam_angle_rad = vision_beam_angle * (3.14159f / 180.0f);
+			pid_output = LQR_Compute(&g_lqr_ctrl, g_setpoint, filtered_dist, beam_angle_rad, dt);
 		} else {
 			// Fallback do Custom PID
 			float error = g_setpoint - filtered_dist;

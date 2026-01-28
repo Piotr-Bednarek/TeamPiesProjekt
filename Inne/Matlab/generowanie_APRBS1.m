@@ -27,7 +27,7 @@ N = round(T_total * Fs); % Liczba próbek
 
 % --- Parametry Serwa (Skala 0-200 stopni -> 500-2500us) ---
 pwm_center = 1500;      % [us] Poziom (100 stopni w skali 0-200)
-pwm_range = 90;         % [us] +/- 12 stopni (bezpieczne dla 25cm)
+pwm_range = 120;         % [us] +/- 12 stopni (bezpieczne dla 25cm)
 
 % Czasy trwania impulsów (Bardzo krótkie, żeby nie uderzyć w ścianę)
 min_hold_time = 0.4;   % [s] Szybkie kontry

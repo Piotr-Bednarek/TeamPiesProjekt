@@ -72,8 +72,6 @@ class ControlPanel(QWidget):
     kp_update = Signal(float)
     ki_update = Signal(float)
     kd_update = Signal(float)
-    k1_update = Signal(float)  # LQR K1
-    k2_update = Signal(float)  # LQR K2
     setpoint_update = Signal(float)
     calibration_update = Signal(int, float, float)
     mode_update = Signal(int)
@@ -183,51 +181,6 @@ class ControlPanel(QWidget):
 
         self.layout.addWidget(pid_group)
 
-        # === LQR Parameters ===
-        lqr_group = QFrame()
-        lqr_group.setObjectName("lqrGroup")
-        lqr_group.setStyleSheet("#lqrGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
-        lqr_layout = QVBoxLayout(lqr_group)
-        lqr_layout.setContentsMargins(5, 5, 5, 5)
-        lqr_layout.setSpacing(5)
-
-        lqr_label = QLabel("PARAMETRY LQR")
-        lqr_label.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 11px;")
-        lqr_layout.addWidget(lqr_label)
-
-        # Wzmocnienia K (obliczone)
-        k_gains_header = QLabel("Wzmocnienia (K):")
-        k_gains_header.setStyleSheet("color: #60a5fa; font-size: 10px;")
-        lqr_layout.addWidget(k_gains_header)
-
-        self.sli_k1 = SliderControl("K1", 0.0, 100.0, 0.01, 31.65)
-        self.sli_k2 = SliderControl("K2", 0.0, 20.0, 0.01, 3.16)
-
-        self.sli_k1.value_committed.connect(self._on_k1_change)
-        self.sli_k2.value_committed.connect(self._on_k2_change)
-
-        lqr_layout.addWidget(self.sli_k1)
-        lqr_layout.addWidget(self.sli_k2)
-
-        # Macierze wag Q i R
-        weights_header = QLabel("Macierze wag (Q, R):")
-        weights_header.setStyleSheet("color: #a78bfa; font-size: 10px; margin-top: 5px;")
-        lqr_layout.addWidget(weights_header)
-
-        self.sli_q1 = SliderControl("Q[0,0]", 1.0, 1000.0, 1.0, 100.0)
-        self.sli_q2 = SliderControl("Q[1,1]", 0.1, 100.0, 0.1, 1.0)
-        self.sli_r = SliderControl("R", 0.01, 10.0, 0.01, 0.1)
-
-        self.sli_q1.value_committed.connect(self._on_lqr_weights_change)
-        self.sli_q2.value_committed.connect(self._on_lqr_weights_change)
-        self.sli_r.value_committed.connect(self._on_lqr_weights_change)
-
-        lqr_layout.addWidget(self.sli_q1)
-        lqr_layout.addWidget(self.sli_q2)
-        lqr_layout.addWidget(self.sli_r)
-
-        self.layout.addWidget(lqr_group)
-
         # === Presets ===
         self.presets_file = os.path.join(os.path.dirname(__file__), "..", "pid_presets.txt")
         self.presets = {}
@@ -290,47 +243,8 @@ class ControlPanel(QWidget):
     def _on_kd_change(self, val):
         self.kd_update.emit(val)
 
-    def _on_k1_change(self, val):
-        self.k1_update.emit(val)
-
-    def _on_k2_change(self, val):
-        self.k2_update.emit(val)
-
     def _on_controller_mode_change(self, mode_id):
         self.pid_mode_update.emit(mode_id)
-
-    def _on_lqr_weights_change(self):
-        """Przelicz K na podstawie Q i R"""
-        try:
-            from scipy.linalg import solve_continuous_are
-            import numpy as np
-
-            q1 = self.sli_q1.slider.value() / self.sli_q1.factor
-            q2 = self.sli_q2.slider.value() / self.sli_q2.factor
-            r = self.sli_r.slider.value() / self.sli_r.factor
-
-            Q = np.diag([q1, q2])
-            R = np.array([[r]])
-
-            A = np.array([[0, 0], [1, 0]])
-
-            B = np.array([[4], [0]])
-
-            P = solve_continuous_are(A, B, Q, R)
-            K = np.linalg.inv(R) @ B.T @ P
-
-            # Aktualizuj suwaki K1 i K2
-            self.sli_k1.set_value(K[0, 0])
-            self.sli_k2.set_value(K[0, 1])
-
-            # Wyślij nowe wzmocnienia
-            self.k1_update.emit(K[0, 0])
-            self.k2_update.emit(K[0, 1])
-
-            print(f"LQR: Q=[{q1}, {q2}], R={r} -> K=[{K[0,0]:.2f}, {K[0,1]:.2f}]")
-
-        except Exception as e:
-            print(f"Błąd obliczania LQR: {e}")
 
     def _on_mode_change(self, btn_id):
         self.pid_mode_update.emit(btn_id)

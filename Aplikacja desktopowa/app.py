@@ -141,8 +141,6 @@ class MainWindow(QMainWindow):
         self.control_panel.kp_update.connect(self.serial.send_pid_p)
         self.control_panel.ki_update.connect(self.serial.send_pid_i)
         self.control_panel.kd_update.connect(self.serial.send_pid_d)
-        self.control_panel.k1_update.connect(self.serial.send_lqr_k1)
-        self.control_panel.k2_update.connect(self.serial.send_lqr_k2)
 
         self.control_panel.setpoint_update.connect(self.serial.send_setpoint)
         self.control_panel.calibration_update.connect(self.serial.send_calibration)

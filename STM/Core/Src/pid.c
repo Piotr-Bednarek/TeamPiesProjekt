@@ -78,39 +78,30 @@ float PID_Compute(PID_Controller_t *pid, float setpoint, float measured) {
     float32_t out_pi = arm_pid_f32(&pid->instance, filtered_error);
     float32_t out = out_pi;
 
-    // Jeśli tryb Derivative on Measurement, dodaj ręcznie człon różniczkujący
-    // Wzór: D = -Kd * (pomiar - poprz_pomiar)
+    // Derivative on Measurement
     float d_term = 0.0f;
     if (pid->mode == PID_MODE_DERIV_ON_MEASUREMENT) {
-        // Uwaga: CMSIS PID w tym trybie ma wewn. Kd = 0, więc nie liczy D z błędu.
-        // Dodajemy D liczone ze zmiany pomiaru.
         d_term = -pid->Kd_user * (measured - pid->prev_meas);
         out += d_term;
     }
     pid->prev_meas = measured;
     
-    // Wyjście PID jest offsetem od centrum (zdefiniowane w main.h)
-    // Saturacja do zakresu [min-SERVO_CENTER, max-SERVO_CENTER]
-    float center = SERVO_CENTER;
-    float max_offset = pid->output_max - center;  
-    float min_offset = pid->output_min - center;  
+    // Saturacja
+    float max_offset = pid->output_max - SERVO_CENTER;  
+    float min_offset = pid->output_min - SERVO_CENTER;  
     
     if (out > max_offset) {
         out = max_offset;
-        // ANTI-WINDUP: Zapisz tylko P+I (bez D!) do state[2]
-        // D nie powinno być akumulowane w velocity-form PID
         float32_t pi_saturated = max_offset - d_term;
         if (pi_saturated > max_offset) pi_saturated = max_offset;
         pid->instance.state[2] = pi_saturated;
     } else if (out < min_offset) {
         out = min_offset;
-        // ANTI-WINDUP: Zapisz tylko P+I (bez D!)
         float32_t pi_saturated = min_offset - d_term;
         if (pi_saturated < min_offset) pi_saturated = min_offset;
         pid->instance.state[2] = pi_saturated;
     }
     
-    // Dodaj centrum aby uzyskać finalny kąt serwa
     return SERVO_CENTER + out;
 }
 
@@ -133,7 +124,6 @@ void PID_Reset(PID_Controller_t *pid) {
  * @param Kd Nowe wzmocnienie różniczkujące.
  */
 void PID_UpdateGains(PID_Controller_t *pid, float Kp, float Ki, float Kd) {
-    // Zapisz stan (całka i historia błędów)
     float32_t state0 = pid->instance.state[0];
     float32_t state1 = pid->instance.state[1];
     float32_t state2 = pid->instance.state[2];
@@ -150,10 +140,7 @@ void PID_UpdateGains(PID_Controller_t *pid, float Kp, float Ki, float Kd) {
         pid->instance.Kd = Kd;   // Standardowy tryb
     }
     
-    // Przelicz współczynniki A0, A1, A2 (to samo co arm_pid_init_f32)
-    // A0 = Kp + Ki + Kd
-    // A1 = -(Kp + 2*Kd)
-    // A2 = Kd
+    // Recalc A0, A1, A2
     pid->instance.A0 = pid->instance.Kp + pid->instance.Ki + pid->instance.Kd;
     pid->instance.A1 = -(pid->instance.Kp + 2.0f * pid->instance.Kd);
     pid->instance.A2 = pid->instance.Kd;

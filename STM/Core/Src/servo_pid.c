@@ -47,55 +47,46 @@ float ServoPID_Compute(ServoPID_Controller *pid, float error, float measurement)
 	pid->Ki = g_Ki;
 	pid->Kd = g_Kd;
 
-	// 1. Obliczamy D (Derivative) najpierw, aby znać jej wpływ na wyjście
+	// D (Derivative on Measurement)
 	float D = 0.0f;
 	float raw_derivative = -(measurement - pid->prevMeasurement);
-
 	if (raw_derivative > -D_DEADBAND && raw_derivative < D_DEADBAND) {
 		raw_derivative = 0.0f;
 	}
 	float filtered_derivative = EMA_Update(&pid->d_filter, raw_derivative);
 	D = pid->Kd * filtered_derivative;
-	pid->prevMeasurement = measurement; // Update state
+	pid->prevMeasurement = measurement;
 
-	// 2. Obliczamy P (Proportional)
+	// P (Proportional)
 	float P = pid->Kp * error;
 
-	// 3. Obliczamy Anti-Windup (Clamping)
-	// Obliczamy wyjście bez nowej całki (używamy starej całki)
+	// Anti-Windup (Clamping)
 	float old_I = pid->Ki * pid->integral;
 	float tentative_output = SERVO_CENTER + P + old_I + D;
 
 	int saturated = 0;
-	// Sprawdzamy czy to wyjście przekracza limity
 	if (tentative_output > SERVO_MAX_LIMIT) {
-		saturated = 1; // Nasycenie górne
+		saturated = 1;
 	} else if (tentative_output < SERVO_MIN_LIMIT) {
-		saturated = -1; // Nasycenie dolne
+		saturated = -1;
 	}
 
-	// Anti-Windup (Clamping z decay)
 	if (saturated == 0) {
-		// Nie nasycone - normalna akumulacja
 		pid->integral += error;
 	} else if (saturated == 1 && error < 0) {
-		// Nasycenie górne, ale error ciągnie w dół - pozwól akumulować (odwijanie)
 		pid->integral += error;
 	} else if (saturated == -1 && error > 0) {
-		// Nasycenie dolne, ale error ciągnie w górę - pozwól akumulować (odwijanie)
 		pid->integral += error;
 	} else {
-		// Nasycone i error pogłębia nasycenie - decay całki zamiast akumulacji
-		pid->integral *= 0.9f;  // Bardzo szybki decay
+		pid->integral *= 0.9f;
 	}
 
-	// Twardy limit całki (bardzo mały dla uniknięcia blokowania)
 	if (pid->integral > 100.0f)
 		pid->integral = 100.0f;
 	if (pid->integral < -100.0f)
 		pid->integral = -100.0f;
 
-	// 4. Finalne wyjście
+	// Output
 	float new_I = pid->Ki * pid->integral;
 	float output = SERVO_CENTER + P + new_I + D;
 

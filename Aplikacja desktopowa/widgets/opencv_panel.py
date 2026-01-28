@@ -116,6 +116,26 @@ class OpenCVPanel(QWidget):
         # Current view mode (0 = ball, 1 = aruco, 2 = measurements)
         self.current_tab = 0
 
+        # === ROI (Region of Interest) for optimized detection ===
+        # Format: (x, y, width, height) as fraction of frame (0.0-1.0)
+        # None = full frame
+        self.roi_ball_enabled = True
+        self.roi_ball = (0.0, 0.2, 1.0, 0.6)  # Środkowa część obrazu (piłka na belce)
+        self.roi_aruco_enabled = True
+        self.roi_aruco = (0.0, 0.1, 1.0, 0.8)  # Szerszy obszar dla markerów (fallback)
+        
+        # Dynamic ROI tracking - aktualizuje ROI na podstawie ostatniej pozycji
+        self.roi_dynamic_enabled = True
+        self.roi_dynamic_margin = 100  # piksele marginesu wokół ostatniej pozycji piłeczki
+        self._last_ball_roi = None  # dynamiczny ROI dla piłeczki
+        
+        # Dynamic ArUco ROI - osobny ROI dla każdego markera (ID 0, 1, 2, 3)
+        self.roi_aruco_dynamic_enabled = True
+        self.roi_aruco_dynamic_margin = 60  # piksele marginesu wokół każdego markera
+        self._last_aruco_positions = {}  # {marker_id: (x, y)} ostatnie pozycje
+        self._aruco_marker_miss_count = {}  # {marker_id: count} licznik brakujących klatek
+        self._aruco_roi_miss_max = 10  # po ilu klatkach wrócić do pełnego obrazu dla danego markera
+
         # Storage for ArUco markers (shared between tabs)
         self.aruco_centers = {}
         self._held_aruco_centers = {}  # Held markers when temporarily lost
@@ -1145,10 +1165,178 @@ class OpenCVPanel(QWidget):
         # Convert to QPixmap and display
         self._display_frame(combined)
 
+    def _get_roi_coords(self, frame, roi_tuple):
+        """Konwertuje ROI z frakcji (0-1) na piksele"""
+        h, w = frame.shape[:2]
+        x = int(roi_tuple[0] * w)
+        y = int(roi_tuple[1] * h)
+        rw = int(roi_tuple[2] * w)
+        rh = int(roi_tuple[3] * h)
+        # Upewnij się że nie wychodzimy poza obraz
+        x = max(0, min(x, w - 1))
+        y = max(0, min(y, h - 1))
+        rw = min(rw, w - x)
+        rh = min(rh, h - y)
+        return x, y, rw, rh
+
+    def _get_dynamic_ball_roi(self, frame):
+        """Zwraca dynamiczny ROI wokół ostatniej pozycji piłeczki"""
+        if not self.roi_dynamic_enabled or self._last_ball_roi is None:
+            return None
+        h, w = frame.shape[:2]
+        lx, ly = self._last_ball_roi
+        margin = self.roi_dynamic_margin
+        x1 = max(0, lx - margin)
+        y1 = max(0, ly - margin)
+        x2 = min(w, lx + margin)
+        y2 = min(h, ly + margin)
+        return (x1, y1, x2 - x1, y2 - y1)
+
+    def _get_marker_roi(self, frame, marker_id):
+        """Zwraca ROI dla pojedynczego markera na podstawie jego ostatniej pozycji"""
+        if not self.roi_aruco_dynamic_enabled:
+            return None
+        if marker_id not in self._last_aruco_positions:
+            return None
+        
+        # Sprawdź czy nie za dużo klatek bez tego markera
+        miss_count = self._aruco_marker_miss_count.get(marker_id, 0)
+        if miss_count >= self._aruco_roi_miss_max:
+            return None  # Wróć do pełnego skanowania dla tego markera
+        
+        h, w = frame.shape[:2]
+        lx, ly = self._last_aruco_positions[marker_id]
+        margin = self.roi_aruco_dynamic_margin
+        
+        x1 = max(0, lx - margin)
+        y1 = max(0, ly - margin)
+        x2 = min(w, lx + margin)
+        y2 = min(h, ly + margin)
+        
+        return (x1, y1, x2 - x1, y2 - y1)
+
+    def _update_aruco_positions(self, centers):
+        """Aktualizuje ostatnie pozycje wszystkich wykrytych markerów"""
+        detected_ids = set(centers.keys())
+        expected_ids = {0, 1, 2, 3}
+        
+        # Aktualizuj pozycje wykrytych markerów
+        for mid, pos in centers.items():
+            self._last_aruco_positions[mid] = pos
+            self._aruco_marker_miss_count[mid] = 0
+        
+        # Zwiększ licznik dla markerów które nie zostały wykryte
+        for mid in expected_ids:
+            if mid not in detected_ids:
+                self._aruco_marker_miss_count[mid] = self._aruco_marker_miss_count.get(mid, 0) + 1
+
+    def _detect_markers_in_rois(self, frame, gray_raw):
+        """Wykrywa markery ArUco w osobnych ROI dla każdego markera (ID 0, 1, 2, 3)
+        Ulepszenia obrazu (kontrast, gamma, sharpening) są stosowane TYLKO do małych ROI.
+        """
+        h_frame, w_frame = frame.shape[:2]
+        all_corners = []
+        all_ids = []
+        expected_ids = {0, 1, 2, 3}
+        found_ids = set()
+        
+        # Najpierw szukaj w małych ROI wokół ostatnich pozycji
+        for marker_id in expected_ids:
+            roi = self._get_marker_roi(frame, marker_id)
+            if roi is None:
+                continue
+            
+            rx, ry, rw, rh = roi
+            if rw < 20 or rh < 20:
+                continue
+            
+            # Wytnij ROI z surowego obrazu gray
+            roi_gray = gray_raw[ry:ry+rh, rx:rx+rw].copy()
+            
+            # === Stosuj ulepszenia TYLKO do tego małego ROI ===
+            if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
+                roi_gray = cv2.convertScaleAbs(roi_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
+            
+            if self._gamma_lut is not None:
+                roi_gray = cv2.LUT(roi_gray, self._gamma_lut)
+            
+            if self.aruco_sharpen_enabled:
+                roi_gray = cv2.filter2D(roi_gray, -1, self._sharpen_kernel)
+            
+            # Wykryj markery w tym ROI
+            corners, ids, _ = self.aruco_detector.detectMarkers(roi_gray)
+            
+            if ids is not None:
+                for i, mid in enumerate(ids):
+                    mid_val = int(mid[0])
+                    if mid_val == marker_id:  # Znaleźliśmy szukany marker
+                        # Przelicz współrzędne na pełny obraz
+                        corner = corners[i].copy()
+                        corner[0][:, 0] += rx
+                        corner[0][:, 1] += ry
+                        all_corners.append(corner)
+                        all_ids.append(mid)
+                        found_ids.add(mid_val)
+                        break
+        
+        # Dla markerów których nie znaleziono w ROI - szukaj w większym obszarze
+        missing_ids = expected_ids - found_ids
+        if missing_ids:
+            # Użyj statycznego ROI jako fallback (jeśli włączony)
+            if self.roi_aruco_enabled:
+                rx, ry, rw, rh = self._get_roi_coords(frame, self.roi_aruco)
+                search_gray = gray_raw[ry:ry+rh, rx:rx+rw].copy()
+                offset_x, offset_y = rx, ry
+            else:
+                search_gray = gray_raw.copy()
+                offset_x, offset_y = 0, 0
+            
+            # Stosuj ulepszenia do fallback ROI
+            if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
+                search_gray = cv2.convertScaleAbs(search_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
+            
+            if self._gamma_lut is not None:
+                search_gray = cv2.LUT(search_gray, self._gamma_lut)
+            
+            if self.aruco_sharpen_enabled:
+                search_gray = cv2.filter2D(search_gray, -1, self._sharpen_kernel)
+            
+            corners, ids, _ = self.aruco_detector.detectMarkers(search_gray)
+            
+            if ids is not None:
+                for i, mid in enumerate(ids):
+                    mid_val = int(mid[0])
+                    if mid_val in missing_ids and mid_val not in found_ids:
+                        corner = corners[i].copy()
+                        corner[0][:, 0] += offset_x
+                        corner[0][:, 1] += offset_y
+                        all_corners.append(corner)
+                        all_ids.append(mid)
+                        found_ids.add(mid_val)
+        
+        return all_corners, np.array(all_ids) if all_ids else None
+
     def _process_ball_detection(self, frame):
-        """Process frame for ball detection using HSV"""
+        """Process frame for ball detection using HSV with ROI optimization"""
+        h_frame, w_frame = frame.shape[:2]
+        
+        # === ROI dla piłeczki ===
+        roi_offset_x, roi_offset_y = 0, 0
+        
+        # Najpierw próbuj dynamiczny ROI (wokół ostatniej pozycji)
+        dynamic_roi = self._get_dynamic_ball_roi(frame)
+        if dynamic_roi is not None:
+            roi_offset_x, roi_offset_y, rw, rh = dynamic_roi
+            process_frame = frame[roi_offset_y:roi_offset_y+rh, roi_offset_x:roi_offset_x+rw]
+        elif self.roi_ball_enabled:
+            # Użyj statycznego ROI
+            roi_offset_x, roi_offset_y, rw, rh = self._get_roi_coords(frame, self.roi_ball)
+            process_frame = frame[roi_offset_y:roi_offset_y+rh, roi_offset_x:roi_offset_x+rw]
+        else:
+            process_frame = frame
+
         # Apply blur and convert to HSV
-        blur = cv2.GaussianBlur(frame, (self.blur_size, self.blur_size), 0)
+        blur = cv2.GaussianBlur(process_frame, (self.blur_size, self.blur_size), 0)
         hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
 
         # Create mask
@@ -1174,12 +1362,22 @@ class OpenCVPanel(QWidget):
 
             if area > self.min_area:
                 ((x, y), radius) = cv2.minEnclosingCircle(cnt)
-                self.ball_x = int(x)
-                self.ball_y = int(y)
+                # Przelicz współrzędne z ROI na pełny obraz
+                self.ball_x = int(x) + roi_offset_x
+                self.ball_y = int(y) + roi_offset_y
                 self.ball_detected = True
+                
+                # Aktualizuj dynamiczny ROI dla następnej klatki
+                self._last_ball_roi = (self.ball_x, self.ball_y)
 
                 cv2.circle(final_frame, (self.ball_x, self.ball_y), int(radius), (0, 255, 0), 2)
                 cv2.circle(final_frame, (self.ball_x, self.ball_y), 5, (0, 0, 255), -1)
+                
+                # Rysuj ROI (opcjonalnie - do debugowania)
+                if roi_offset_x > 0 or roi_offset_y > 0:
+                    cv2.rectangle(final_frame, (roi_offset_x, roi_offset_y), 
+                                  (roi_offset_x + process_frame.shape[1], roi_offset_y + process_frame.shape[0]),
+                                  (255, 255, 0), 1)
 
                 # Position text
                 cv2.putText(final_frame, f"Ball: ({self.ball_x}, {self.ball_y})", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
@@ -1190,6 +1388,9 @@ class OpenCVPanel(QWidget):
 
                 # Emit signal
                 self.ball_position_update.emit(self.ball_x, self.ball_y)
+        else:
+            # Nie znaleziono - wyłącz dynamiczny ROI żeby przeszukać cały obraz
+            self._last_ball_roi = None
 
         # Log state changes only
         if self.ball_detected and not self._last_ball_state:
@@ -1211,8 +1412,13 @@ class OpenCVPanel(QWidget):
         cv2.putText(final_frame, f"FPS: {self.current_fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(frame, "Oryginal", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-        # Convert mask to BGR for display
-        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        # Convert mask to BGR for display - resize to full frame size if ROI was used
+        if mask.shape[:2] != frame.shape[:2]:
+            mask_full = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+            mask_full[roi_offset_y:roi_offset_y+mask.shape[0], roi_offset_x:roi_offset_x+mask.shape[1]] = mask
+            mask_bgr = cv2.cvtColor(mask_full, cv2.COLOR_GRAY2BGR)
+        else:
+            mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
         cv2.putText(mask_bgr, "Maska HSV", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         # cv2.putText(final_frame, "Detekcja Pileczki", (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
@@ -1224,61 +1430,35 @@ class OpenCVPanel(QWidget):
         return combined
 
     def _process_aruco_detection(self, frame):
-        """Process frame for ArUco marker detection with enhanced processing"""
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Apply brightness/contrast adjustments for detection
-        if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
-            gray_adjusted = cv2.convertScaleAbs(gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
-        else:
-            gray_adjusted = gray
-
-        # Apply cached gamma correction
-        if self._gamma_lut is not None:
-            gray_adjusted = cv2.LUT(gray_adjusted, self._gamma_lut)
-
-        # ENHANCED: Apply sharpening kernel (emphasizes edges for better marker detection)
-        if self.aruco_sharpen_enabled:
-            gray_adjusted = cv2.filter2D(gray_adjusted, -1, self._sharpen_kernel)
-
-        # ENHANCED: Super-resolution upscaling for small markers
-        scale_factor = self.aruco_upscale_factor if self.aruco_upscale_enabled else 1.0
-        if scale_factor > 1.0:
-            h, w = gray_adjusted.shape[:2]
-            # Use INTER_LANCZOS4 for best quality upscaling (better than CUBIC for edge detection)
-            gray_upscaled = cv2.resize(gray_adjusted, (int(w * scale_factor), int(h * scale_factor)), interpolation=cv2.INTER_LANCZOS4)
-            # Detect markers on upscaled image
-            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_upscaled)
-            # IMPORTANT: Scale detected corner coordinates back down to original resolution
-            if corners:
-                for corner in corners:
-                    corner /= scale_factor
-        else:
-            # Standard detection without upscaling
-            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
-
-        # Filter markers by minimum area and allowed IDs
-        allowed_ids = {0, 1, 2, 3}  # Szukaj tylko markerów o ID 0, 1, 2, 3
-        filtered_corners = []
-        filtered_ids = []
-        if ids is not None and len(ids) > 0:
-            for i, marker_id in enumerate(ids):
-                # Sprawdzam zarówno obszar jak i czy ID jest na liście dozwolonych
-                area = cv2.contourArea(corners[i])
-                if area >= self.aruco_min_area and marker_id[0] in allowed_ids:
-                    filtered_corners.append(corners[i])
-                    filtered_ids.append(marker_id)
+        """Process frame for ArUco marker detection with per-marker ROI optimization"""
+        h_frame, w_frame = frame.shape[:2]
+        
+        # Surowy obraz w skali szarości (bez ulepszeń - te są stosowane w ROI)
+        gray_raw = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Użyj funkcji do wykrywania markerów w osobnych ROI
+        # (ulepszenia są stosowane wewnątrz tej funkcji tylko do małych ROI)
+        filtered_corners, filtered_ids = self._detect_markers_in_rois(frame, gray_raw)
 
         # Create display frame
         frame_with_aruco = frame.copy()
+        
+        # Rysuj ROI dla każdego markera (do debugowania)
+        for marker_id in [0, 1, 2, 3]:
+            roi = self._get_marker_roi(frame, marker_id)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                color = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0)][marker_id]  # Różne kolory
+                cv2.rectangle(frame_with_aruco, (rx, ry), (rx + rw, ry + rh), color, 1)
+        
         centers = {}
         num_markers = 0
         current_ids = set()
 
-        if filtered_ids:
+        if filtered_ids is not None and len(filtered_ids) > 0:
             num_markers = len(filtered_ids)
-            frame_with_aruco = cv2.aruco.drawDetectedMarkers(frame_with_aruco, filtered_corners, np.array(filtered_ids))
+            
+            frame_with_aruco = cv2.aruco.drawDetectedMarkers(frame_with_aruco, filtered_corners, filtered_ids)
 
             # Calculate centers and draw text
             for i, marker_id in enumerate(filtered_ids):
@@ -1301,6 +1481,9 @@ class OpenCVPanel(QWidget):
             self.aruco_markers_update.emit(centers)
         else:
             cv2.putText(frame_with_aruco, "No ArUco markers detected", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
+
+        # Aktualizuj pozycje markerów dla następnej klatki
+        self._update_aruco_positions(centers)
 
         # Log ArUco state changes
         new_ids = current_ids - self._last_aruco_ids
@@ -1328,13 +1511,48 @@ class OpenCVPanel(QWidget):
         cv2.putText(frame_with_aruco, f"MinArea: {self.aruco_min_area}px^2", (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
         cv2.putText(frame, "Oryginal", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-        # Gray image for debug view (with adjustments used for detection)
-        gray_bgr = cv2.cvtColor(gray_adjusted, cv2.COLOR_GRAY2BGR)
-        cv2.putText(gray_bgr, "Detekcja (B/C/G)", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        # === Podgląd przetworzonych ROI ===
+        # Stwórz obraz pokazujący przetworzone ROI dla każdego markera
+        roi_preview = np.zeros((h_frame, w_frame), dtype=np.uint8)
+        
+        for marker_id in [0, 1, 2, 3]:
+            roi = self._get_marker_roi(frame, marker_id)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                if rw >= 20 and rh >= 20:
+                    # Wytnij i przetwórz ROI (tak samo jak w detekcji)
+                    roi_gray = gray_raw[ry:ry+rh, rx:rx+rw].copy()
+                    
+                    if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
+                        roi_gray = cv2.convertScaleAbs(roi_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
+                    
+                    if self._gamma_lut is not None:
+                        roi_gray = cv2.LUT(roi_gray, self._gamma_lut)
+                    
+                    if self.aruco_sharpen_enabled:
+                        roi_gray = cv2.filter2D(roi_gray, -1, self._sharpen_kernel)
+                    
+                    # Wstaw przetworzony ROI do podglądu
+                    roi_preview[ry:ry+rh, rx:rx+rw] = roi_gray
+        
+        # Konwertuj na BGR i dodaj etykiety
+        roi_preview_bgr = cv2.cvtColor(roi_preview, cv2.COLOR_GRAY2BGR)
+        
+        # Narysuj ramki ROI na podglądzie
+        for marker_id in [0, 1, 2, 3]:
+            roi = self._get_marker_roi(frame, marker_id)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                color = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0)][marker_id]
+                cv2.rectangle(roi_preview_bgr, (rx, ry), (rx + rw, ry + rh), color, 2)
+                cv2.putText(roi_preview_bgr, f"ID:{marker_id}", (rx + 5, ry + 20), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        
+        cv2.putText(roi_preview_bgr, "ROI (B/C/G/S)", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.putText(frame_with_aruco, "ArUco Detection", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         # Create combined view
-        top_row = np.hstack([frame, gray_bgr])
+        top_row = np.hstack([frame, roi_preview_bgr])
         frame_with_aruco_resized = cv2.resize(frame_with_aruco, (top_row.shape[1], frame.shape[0]))
         combined = np.vstack([top_row, frame_with_aruco_resized])
 
@@ -1408,9 +1626,23 @@ class OpenCVPanel(QWidget):
         return angle_deg
 
     def _process_measurements(self, frame):
-        """Process frame for combined ball + ArUco measurements"""
+        """Process frame for combined ball + ArUco measurements with ROI optimization"""
+        h_frame, w_frame = frame.shape[:2]
+        
+        # === ROI dla piłeczki ===
+        ball_roi_offset_x, ball_roi_offset_y = 0, 0
+        dynamic_roi = self._get_dynamic_ball_roi(frame)
+        if dynamic_roi is not None:
+            ball_roi_offset_x, ball_roi_offset_y, rw, rh = dynamic_roi
+            ball_process_frame = frame[ball_roi_offset_y:ball_roi_offset_y+rh, ball_roi_offset_x:ball_roi_offset_x+rw]
+        elif self.roi_ball_enabled:
+            ball_roi_offset_x, ball_roi_offset_y, rw, rh = self._get_roi_coords(frame, self.roi_ball)
+            ball_process_frame = frame[ball_roi_offset_y:ball_roi_offset_y+rh, ball_roi_offset_x:ball_roi_offset_x+rw]
+        else:
+            ball_process_frame = frame
+        
         # --- Ball detection ---
-        blur = cv2.GaussianBlur(frame, (self.blur_size, self.blur_size), 0)
+        blur = cv2.GaussianBlur(ball_process_frame, (self.blur_size, self.blur_size), 0)
         hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, (self.h_min, self.s_min, self.v_min), (self.h_max, self.s_max, self.v_max))
 
@@ -1426,53 +1658,34 @@ class OpenCVPanel(QWidget):
             area = cv2.contourArea(cnt)
             if area > self.min_area:
                 ((x, y), radius) = cv2.minEnclosingCircle(cnt)
-                self.ball_x = int(x)
-                self.ball_y = int(y)
+                # Przelicz na pełny obraz
+                self.ball_x = int(x) + ball_roi_offset_x
+                self.ball_y = int(y) + ball_roi_offset_y
                 self.ball_detected = True
-
-        # --- ArUco detection with hold (using enhanced processing) ---
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Apply brightness/contrast adjustments
-        if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
-            gray_adjusted = cv2.convertScaleAbs(gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
+                self._last_ball_roi = (self.ball_x, self.ball_y)
         else:
-            gray_adjusted = gray
+            self._last_ball_roi = None
 
-        # Apply cached gamma correction
-        if self._gamma_lut is not None:
-            gray_adjusted = cv2.LUT(gray_adjusted, self._gamma_lut)
-
-        # ENHANCED: Apply sharpening kernel
-        if self.aruco_sharpen_enabled:
-            gray_adjusted = cv2.filter2D(gray_adjusted, -1, self._sharpen_kernel)
-
-        # ENHANCED: Super-resolution upscaling
-        scale_factor = self.aruco_upscale_factor if self.aruco_upscale_enabled else 1.0
-        if scale_factor > 1.0:
-            h, w = gray_adjusted.shape[:2]
-            gray_upscaled = cv2.resize(gray_adjusted, (int(w * scale_factor), int(h * scale_factor)), interpolation=cv2.INTER_LANCZOS4)
-            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_upscaled)
-            if corners:
-                for corner in corners:
-                    corner /= scale_factor
-        else:
-            corners, ids, rejected = self.aruco_detector.detectMarkers(gray_adjusted)
+        # === ArUco detection z osobnym ROI dla każdego markera ===
+        # Surowy obraz w skali szarości (ulepszenia są stosowane w ROI)
+        gray_raw = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Użyj funkcji do wykrywania markerów w osobnych ROI
+        # (ulepszenia są stosowane wewnątrz tej funkcji tylko do małych ROI)
+        filtered_corners, filtered_ids = self._detect_markers_in_rois(frame, gray_raw)
 
         current_aruco_centers = {}
-        if ids is not None and len(ids) > 0:
-            for i, marker_id in enumerate(ids):
-                area_aruco = cv2.contourArea(corners[i])
-                if area_aruco >= self.aruco_min_area:
-                    corner = corners[i][0]
-                    center_x = int((corner[0][0] + corner[2][0]) / 2)
-                    center_y = int((corner[0][1] + corner[2][1]) / 2)
-                    mid = int(marker_id[0])
-                    current_aruco_centers[mid] = (center_x, center_y)
-                    # Reset hold counter when marker is detected
-                    self._aruco_hold_frames[mid] = 0
-                    # Update held position
-                    self._held_aruco_centers[mid] = (center_x, center_y)
+        if filtered_ids is not None and len(filtered_ids) > 0:
+            for i, marker_id in enumerate(filtered_ids):
+                mid = int(marker_id[0])
+                corner = filtered_corners[i][0]
+                center_x = int((corner[0][0] + corner[2][0]) / 2)
+                center_y = int((corner[0][1] + corner[2][1]) / 2)
+                current_aruco_centers[mid] = (center_x, center_y)
+                # Reset hold counter when marker is detected
+                self._aruco_hold_frames[mid] = 0
+                # Update held position
+                self._held_aruco_centers[mid] = (center_x, center_y)
 
         # Apply hold for markers that were recently lost
         self.aruco_centers = dict(current_aruco_centers)
@@ -1486,6 +1699,9 @@ class OpenCVPanel(QWidget):
                     # Hold expired, remove
                     del self._held_aruco_centers[mid]
                     del self._aruco_hold_frames[mid]
+
+        # Aktualizuj pozycje markerów dla następnej klatki
+        self._update_aruco_positions(current_aruco_centers)
 
         # --- Calculate measurements ---
         self._raw_ball_position = -1.0
@@ -1582,8 +1798,13 @@ class OpenCVPanel(QWidget):
         cv2.putText(final_frame, f"Pozycja: {self.ball_position_mm:.1f}mm" if self.ball_position_mm >= 0 else "Pozycja: --", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1, cv2.LINE_AA)
         cv2.putText(final_frame, f"Kat: {self.beam_angle:.2f} deg", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
 
-        # Convert mask to BGR
-        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        # Convert mask to BGR - resize to full frame size if ROI was used
+        if mask.shape[:2] != frame.shape[:2]:
+            mask_full = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+            mask_full[ball_roi_offset_y:ball_roi_offset_y+mask.shape[0], ball_roi_offset_x:ball_roi_offset_x+mask.shape[1]] = mask
+            mask_bgr = cv2.cvtColor(mask_full, cv2.COLOR_GRAY2BGR)
+        else:
+            mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
         cv2.putText(mask_bgr, "Maska HSV", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         cv2.putText(frame, "Oryginal", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 

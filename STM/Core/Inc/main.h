@@ -1,21 +1,21 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.h
-  * @brief          : Header for main.c file.
-  *                   This file contains the common defines of the application.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.h
+ * @brief          : Header for main.c file.
+ *                   This file contains the common defines of the application.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
@@ -144,8 +144,8 @@ void Error_Handler(void);
 #define SERVO_MIN_LIMIT    70.0f
 #define SERVO_MAX_LIMIT    130.0f
 #define SERVO_SLEW_RATE    1000.0f
-#define SERVO_ANGLE_DEADBAND 0.0f
-#define SERVO_SMOOTHING_SIZE 1
+#define SERVO_ANGLE_DEADBAND 0.5f
+#define SERVO_SMOOTHING_SIZE 2
 
 // --- Servo Hardware (PWM) ---
 #define SERVO_MIN_CCR      500
@@ -153,8 +153,8 @@ void Error_Handler(void);
 #define SERVO_MAX_ANGLE    200
 
 // --- PID & Filtration ---
-#define D_DEADBAND         0.0f
-#define D_FILTER_ALPHA     0.5f
+#define D_DEADBAND         0.5f
+#define D_FILTER_ALPHA     0.3f
 
 // --- LED Error Bar ---
 #define LED_ERR_PORT      GPIOE
