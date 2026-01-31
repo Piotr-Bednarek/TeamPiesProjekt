@@ -1,0 +1,318 @@
+\section{Model}
+
+\subsection{Dynamika serwa}
+
+Dynamikę serwomechanizmu w pierwszym przybliżeniu opisuje się jako człon
+inercyjny I rzędu:
+\[
+  G_{\mathrm{serwo}}(s)=\frac{1}{Ts+1},
+\]
+gdzie $T$ jest stałą czasową (im mniejsza wartość $T$, tym szybsza odpowiedź na
+skok sygnału sterującego).
+
+Transmitancja serwa $G_{\mathrm{serwo}}(s)$ jest stosunkiem transformaty Laplace'a 
+kąta serwa $\Theta_{\mathrm{serwo}}(s)$ do transformaty Laplace'a sygnału wejściowego 
+(napięcia sterującego) $U(s)$ w dziedzinie Laplace'a:
+\[
+  G_{\mathrm{serwo}}(s) = \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)}
+\]
+
+W kartach katalogowych serwomechanizmów podawana jest zwykle prędkość typu
+„$t\,\mathrm{s}/60^{\circ}$”, która opisuje maksymalną szybkość przestawiania
+(\emph{slew rate}), a nie bezpośrednio stałą czasową $T$. W modelu uproszczonym
+przyjmuje się jednak, że wraz ze wzrostem prędkości katalogowej maleje efektywna
+stała czasowa.
+
+W nocie katalogowe do serwa podano predkosci przy róznych napieciach zasilania:
+\begin{itemize}
+  \item $0{,}20\,\mathrm{s}/60^{\circ}$ przy $4{,}8\,\mathrm{V}$,
+  \item $0{,}11\,\mathrm{s}/60^{\circ}$ przy $6\,\mathrm{V}$.
+\end{itemize}
+
+
+Przy napięciu $5\,\mathrm{V}$, 
+prędkość wyniesie około:
+\[
+V_{5V}\approx 0{,}20 - \left(\frac{0{,}09}{1{,}2} \cdot 0{,}2\right) \approx 0{,}185\,\mathrm{s}/60^{\circ}
+\]
+
+Jeśli serwo potrzebuje $0{,}185\,\mathrm{s}$ na pokonanie $60^{\circ}$, to jego 
+prędkość maksymalna wynosi ok. $324^{\circ}/\mathrm{s}$.
+
+W klasycznym modelu $G(s)=\frac{1}{Ts+1}$, czas odpowiedzi (10\%--90\%) wynosi 
+ok. $2{,}2T$. Jeśli założymy, że dla małych skoków dynamika jest zbliżona do czasu 
+przemieszczenia podanego w specyfikacji. Dla
+$6\,\mathrm{V}$($0{,}11\,\mathrm{s}/60^{\circ}$) $T$ mogłoby wynosić ok
+$\mathrm{V}$$0{,}05$--$0{,}07\,\mathrm{s}$. Więc dla $5\,\mathrm{V}$
+($0{,}185\,\mathrm{s}/60^{\circ}$) $T$ może wynosić $0{,}095\,\mathrm{s}$ .
+
+Ostatecznie dynamika serwa bedzie opisana jako:
+
+\[
+  G_{\mathrm{serwo}}(s)=\frac{\Theta_{\mathrm{serwo}}(s)}{U(s)}=\frac{1}{T_{\mathrm{serwo}}s+1},
+\]
+
+
+\subsection{Dynamika piłeczki na belce}
+
+Rozpatrując dynamikę piłeczki na belce, wyprowadzamy równanie wiążące kąt belki 
+($\theta$) z przyspieszeniem liniowym piłeczki ($\ddot{x}$). 
+
+\subsubsection{II Zasada Dynamiki $F=ma$}
+
+Patrzmy na siły działające wzdłuż belki:
+\begin{itemize}
+  \item Grawitacja ($F_g$): Jej składowa równoległa do belki wynosi $m \cdot g \cdot \sin(\theta)$.
+  \item Tarcie ($T$): Działa w górę belki i zmusza piłeczkę do obrotu.
+\end{itemize}
+
+Równanie Newtona dla ruchu postępowego:
+\[
+m \cdot \ddot{x} = m \cdot g \cdot \sin(\theta) - T
+\]
+
+\subsubsection{II Zasada Dynamiki $M=J\epsilon$}
+
+Moment obrotowy wokół własnej osi piłeczki jest generowany przez siłę tarcia na 
+ramieniu promienia $R$(promień piłeczki):
+\[
+T \cdot R = J \cdot \ddot{\alpha}
+\]
+gdzie $J$ to moment bezwładności piłeczki, a $\ddot{\alpha}$ to przyspieszenie kątowe.
+
+\subsubsection{Warunek Toczenia bez Poślizgu}
+
+Piłeczka toczy się bez poślizgu, co oznacza, że przyspieszenie liniowe zależy od 
+przyspieszenia kątowego:
+\[
+\ddot{x} = \ddot{\alpha} \cdot R \quad \Rightarrow \quad \ddot{\alpha} = \frac{\ddot{x}}{R}
+\]
+
+\subsubsection{Eliminacja Tarcia i Przyspieszenia Kątowego}
+
+Z warunku toczenia bez poślizgu podstawiamy $\ddot{\alpha}$ do równania momentu:
+\[
+T \cdot R = J \cdot \frac{\ddot{x}}{R} \quad \Rightarrow \quad T = \frac{J \cdot \ddot{x}}{R^2}
+\]
+
+Teraz wstawiamy to wyrażenie na $T$ do równania ruchu postępowego:
+\[
+m \cdot \ddot{x} = m \cdot g \cdot \sin(\theta) - \frac{J \cdot \ddot{x}}{R^2}
+\]
+
+\subsubsection{Rozwiązanie dla Przyspieszenia Liniowego}
+
+Przenosimy człon z $\ddot{x}$ na lewą stronę:
+\[
+m \cdot \ddot{x} + \frac{J \cdot \ddot{x}}{R^2} = m \cdot g \cdot \sin(\theta)
+\]
+
+Wyciągamy $\ddot{x}$ przed nawias:
+\[
+\ddot{x} \left( m + \frac{J}{R^2} \right) = m \cdot g \cdot \sin(\theta)
+\]
+
+Dzielimy przez nawias:
+\[
+\ddot{x} = \frac{m \cdot g \cdot \sin(\theta)}{m + \frac{J}{R^2}}
+\]
+
+Dzieląc licznik i mianownik przez masę $m$:
+\[
+\ddot{x} = \frac{g \cdot \sin(\theta)}{1 + \frac{J}{m R^2}}
+\]
+
+Dla małych kątów $\sin(\theta) \approx \theta$, ostatecznie otrzymujemy:
+\[
+\ddot{x} = \frac{g}{1 + \frac{J}{m R^2}} \cdot \theta
+\]
+gdzie współczynnik:
+\[
+\frac{g}{1 + \frac{J}{m R^2}}=c_{\mathrm{ball}}
+\]
+ostatecznie:
+\[
+\ddot{x}=c_{\mathrm{ball}} \cdot \theta
+\]
+
+\subsubsection{Paramter $c_{\mathrm{ball}}$}
+
+\[
+c_{\mathrm{ball}} = \frac{g}{1 + \frac{J}{m R^2}}
+\]
+
+
+Moment bezwładności: $J = \frac{2}{3} m R^2$. 
+Podstawiając do mianownika:
+\[
+1 + \frac{\frac{2}{3} m R^2}{m R^2} = 1 + \frac{2}{3} = \frac{5}{3} \approx 1{,}667
+\]
+
+Współczynnik:
+\[
+c_{\mathrm{ball}} = \frac{g}{1{,}667} = \frac{3}{5} g = 0{,}6 \, g
+\]
+
+Stała $c_{\mathrm{ball}}$ wyznaczająca dynamikę piłeczki wynosi:
+\[
+c_{\mathrm{ball}} = 0{,}6 \cdot 9{,}81 = 5{,}886 \, \mathrm{m/s^2}
+\]
+
+\subsubsection{Transmitancja piłeczki na belce}
+
+Równanie dynamiki piłeczki w dziedzinie czasu jest następujące:
+\[
+\ddot{x}=c_{\mathrm{ball}} \cdot \theta
+\]
+
+Stosujemy transformatę Laplace'a. Dla warunków początkowych ($x(0) = 0$, $\dot{x}(0) = 0$, $\theta(0) = 0$):
+\[
+\mathcal{L}\{\ddot{x}(t)\} = s^2 \cdot X(s)
+\]
+\[
+\mathcal{L}\{\theta(t)\} = \Theta(s)
+\]
+
+\[
+s^2 \cdot X(s) = c_{\mathrm{ball}} \cdot \Theta(s)
+\]
+
+\paragraph{Wyznaczenie Transmitancji:}
+
+Transmitancja jest definiowana jako stosunek transformaty Laplace'a wyjścia do 
+transformaty Laplace'a wejścia (przy zerowych warunkach początkowych):
+\[
+G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{beam}}(s)}=\frac{c_{\mathrm{ball}}}{s^2}
+\]
+
+\subsection{Transmitancja całego układu}
+
+Posiadając kompletny zestaw opisu dynamik elementów układu, możemy teraz połączyć 
+transmitancję serwa z transmitancją piłeczki na belce, uwzględniając mechaniczne 
+połączenie między nimi.
+
+\subsubsection{Zależnośc pomiedzy $\Theta_{serwo}$ i $\Theta_{beam}$}
+
+Wał serwa jest połączony z belką za pośrednictwem mechanicznego połączenia. 
+Zakładając idealne połączenie, obowiązuje 
+następująca zależność kinematyczna:
+
+\[
+r_{\mathrm{serwo}} \cdot \theta_{\mathrm{serwo}} = r_{\mathrm{belka}} \cdot \theta_{\mathrm{belka}}
+\]
+
+gdzie:
+\begin{itemize}
+  \item $r_{\mathrm{serwo}}$ -- promień dźwigni na wale serwa,
+  \item $\theta_{\mathrm{serwo}}$ -- kąt obrotu serwa $[\mathrm{rad}]$,
+  \item $r_{\mathrm{belka}}$ -- promień dźwigni na wale belki($15\,\mathrm{cm}$),
+  \item $\theta_{\mathrm{belka}}$ -- kąt wychylenia belki $[\mathrm{rad}]$.
+\end{itemize}
+
+Stąd wynika relacja kątów:
+
+\[
+\theta_{\mathrm{belka}} = \frac{r_{\mathrm{serwo}}}{r_{\mathrm{belka}}} \cdot \theta_{\mathrm{serwo}} = k_{mech} \cdot \theta_{\mathrm{serwo}}
+\]
+
+Gdzie $k_{mech}$ jest przekładnią mechaniczna.
+
+\subsubsection{Połączenie Szeregowe Transmitancji}
+
+Układ składa się z dwóch elementów połączonych szeregowo:
+\begin{itemize}
+  \item Serwo: $G_{\mathrm{serwo}}(s) = \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)} = \frac{1}{T_{\mathrm{serwo}} s + 1}$
+  \item Piłeczka na belce: $G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)} = \frac{c_{\mathrm{ball}}}{s^2}$
+\end{itemize}
+
+Dla połączenia szeregowego bez sprzężeń zwrotnych, ścieżka sygnału przebiega:
+
+\[
+U(s) \xrightarrow{G_{\mathrm{serwo}}} \Theta_{\mathrm{serwo}}(s) \xrightarrow{k_{mech}} \Theta_{\mathrm{belka}}(s) \xrightarrow{G_{\mathrm{ball}}} X(s)
+\]
+
+Transmitancja całego systemu wynosi iloczyn transmitancji na każdym odcinku:
+
+\[
+G_{\mathrm{total}}(s) = \frac{X(s)}{U(s)} = G_{\mathrm{serwo}}(s) \cdot k_{mech} \cdot G_{\mathrm{ball}}(s)
+\]
+
+\paragraph{Wyjaśnienie pojawienia się $k_{mech}$ w liczniku:}
+
+Transmitancja piłeczki wynosi:
+\[
+G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)}
+\]
+
+Jednak $\Theta_{\mathrm{belka}}$ nie jest bezpośrednie wyjściem serwa. Musimy podstawić 
+relację $\Theta_{\mathrm{belka}}(s) = k_{mech} \cdot \Theta_{\mathrm{serwo}}(s)$:
+
+\[
+G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)} = \frac{X(s)}{k_{mech} \cdot \Theta_{\mathrm{serwo}}(s)} 
+\]
+
+Stąd wynika:
+\[
+X(s) = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot \Theta_{\mathrm{serwo}}(s)
+\]
+
+Teraz, znając że $\Theta_{\mathrm{serwo}}(s) = G_{\mathrm{serwo}}(s) \cdot U(s)$, mamy:
+
+\[
+X(s) = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s) \cdot U(s)
+\]
+
+Stąd transmitancja całkowita:
+
+\[
+G_{\mathrm{total}}(s) = \frac{X(s)}{U(s)} = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s)
+\]
+
+Podstawiając transmitancje:
+
+\[
+G_{\mathrm{total}}(s) = k_{mech} \cdot \frac{c_{\mathrm{ball}}}{s^2} \cdot \frac{1}{T_{\mathrm{serwo}} s + 1}
+\]
+
+\subsubsection{Ostateczna Forma Transmitancji Całego Układu}
+
+\[
+G_{\mathrm{total}}(s) =\frac{k_{mech} \cdot c_{\mathrm{ball}}}{s^2 \cdot (T_{\mathrm{serwo}} s + 1)}
+\]
+
+Rozwijając mianownik:
+
+\[
+G_{\mathrm{total}}(s) = \frac{k_{mech} \cdot c_{\mathrm{ball}}}{T_{\mathrm{serwo}} s^3 + s^2}
+\]
+
+\paragraph{Równanie w Przestrzeni Stanów:}
+
+Transmitancja trzeciego rzędu może być również reprezentowana w postaci równań 
+stanu, które są wygodne do symulacji numerycznej:
+
+\[
+\begin{cases}
+\dot{x}_1 = x_2 \\
+\dot{x}_2 = x_3 \\
+\dot{x}_3 = -\frac{1}{T_{\mathrm{serwo}}} x_3 + \frac{n \cdot c_{\mathrm{ball}}}{T_{\mathrm{serwo}}} u \\
+y = x_1
+\end{cases}
+\]
+
+gdzie $x_1 = x$ (położenie piłeczki), $x_2 = \dot{x}$ (prędkość piłeczki), 
+$x_3 = \theta_{\mathrm{serwo}}$ (kąt serwa), a $u = U(s)$ to sygnał wejściowy (napięcie).
+
+\subsubsection{Podsumowanie}
+
+Transmitancja całego systemu łączy dynamikę serwa (czlon inercyjny I rzędu) 
+z dynamiką piłeczki na belce (dwa całkowujące człony $s^2$), tworząc system 
+trzeciego rzędu. Przełożenie mechaniczne $n$ amplifikuje efekt serwa na wychylenie 
+belki, natomiast inercja serwa charakteryzowana przez $T_{\mathrm{serwo}}$ opóźnia 
+odpowiedź całego systemu.
+
+
+
+
+
+

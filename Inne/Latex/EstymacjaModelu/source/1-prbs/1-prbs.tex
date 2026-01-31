@@ -1,0 +1,20 @@
+% Chapter content (article class uses sections)
+\section{Metodyka wyznaczenia modelu}
+
+\subsection{PRBS --- pseudo-random binary signal}
+
+PRBS (\emph{Pseudo Random Binary Sequence}; spotyka się też nazwę \emph{Pseudo Random Binary Signal}) jest sekwencją dwustanową (np. $0/1$ lub $-1/+1$), która sprawia wrażenie losowej, lecz jest generowana w sposób deterministyczny (np. z wykorzystaniem rejestru przesuwnego z liniowym sprzężeniem zwrotnym LFSR).
+
+W identyfikacji obiektów PRBS stosuje się jako sygnał pobudzający, ponieważ:
+\begin{itemize}
+  \item ma szerokie widmo (pobudza wiele częstotliwości jednocześnie),
+  \item jest łatwa do wygenerowania i powtórzenia,
+  \item umożliwia utrzymanie ograniczonej amplitudy (istotne przy nasyceniach oraz ze względów bezpieczeństwa układu).
+\end{itemize}
+
+Parametry PRBS (m.in. długość sekwencji oraz czas trwania pojedynczego bitu) dobiera się tak, aby układ zdążył zareagować na zmiany, a jednocześnie aby pobudzenie obejmowało interesujący zakres dynamiki. Ze względu na brak możliwości doboru parametrów PRBS w taki sposób, aby pokryć zakres dynamiki badanego obiektu, uzyskane wyniki nie były zgodne z rzeczywistością.
+
+
+
+
+\subsection{}
