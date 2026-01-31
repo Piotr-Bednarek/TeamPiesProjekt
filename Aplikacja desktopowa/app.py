@@ -147,6 +147,11 @@ class MainWindow(QMainWindow):
         self.control_panel.mode_update.connect(self.serial.send_control_mode)
         self.control_panel.pid_mode_update.connect(self.serial.send_pid_mode)
 
+        # LQR signals
+        self.control_panel.lqr_k1_update.connect(self.serial.send_lqr_k1)
+        self.control_panel.lqr_k2_update.connect(self.serial.send_lqr_k2)
+        self.control_panel.lqr_k3_update.connect(self.serial.send_lqr_k3)
+
         # Connection Tile Interactions
         self.btn_refresh.clicked.connect(self.serial.list_ports)
         self.btn_connect.clicked.connect(self._toggle_connection)
@@ -341,8 +346,9 @@ class MainWindow(QMainWindow):
         layout.setSpacing(5)
 
         self.angle_preset_btns = []
-        for angle in [60, 80, 100, 120, 140]:
-            btn = QPushButton(str(angle))
+        for angle in [-20, -10, 0, 10, 20]:  # Degrees (0 = poziomo)
+            label = f"{angle:+d}°" if angle != 0 else "0°"
+            btn = QPushButton(label)
             btn.setFixedSize(45, 28)
             btn.setStyleSheet("QPushButton { background-color: #334155; color: white; border: none; border-radius: 3px; font-size: 11px; font-weight: bold; }" "QPushButton:hover { background-color: #475569; }")
             btn.clicked.connect(lambda checked, a=angle: self._set_angle_preset(a))
@@ -351,8 +357,9 @@ class MainWindow(QMainWindow):
             self.angle_preset_btns.append(btn)
 
         self.spin_angle_custom = QSpinBox()
-        self.spin_angle_custom.setRange(0, 200)
-        self.spin_angle_custom.setValue(100)
+        self.spin_angle_custom.setRange(-30, 30)  # Degrees
+        self.spin_angle_custom.setValue(0)
+        self.spin_angle_custom.setSuffix("°")
         self.spin_angle_custom.setStyleSheet("background-color: #222; color: white; border: 1px solid #475569; font-size: 10px;")
         self.spin_angle_custom.setFixedWidth(55)
         layout.addWidget(self.spin_angle_custom)
@@ -822,7 +829,7 @@ class MainWindow(QMainWindow):
             # Reset STM32 state on connect
             QThread.msleep(100)
             self.serial.send_setpoint(125)
-            self.serial.send_command("L:100.0")  # Center Servo (Angle)
+            self.serial.send_command("L:0")  # Center Servo (0° = poziomo)
 
             # Enable Test Tab controls
             self.btn_center_servo.setEnabled(True)
@@ -1032,7 +1039,7 @@ class MainWindow(QMainWindow):
     def _center_servo(self):
         """Center the servo so user can place the ball"""
         self.serial.send_regulator_state(0)  # Disable regulator
-        self.serial.send_command("L:100.0")  # Center servo angle
+        self.serial.send_command("L:0")  # Center servo angle (0° = poziomo)
         self.terminal.append_rx("Wycentrowano belkę. Możesz położyć piłeczkę.", "info")
 
         # Update regulator button state in UI

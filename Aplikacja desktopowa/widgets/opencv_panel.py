@@ -131,7 +131,7 @@ class OpenCVPanel(QWidget):
         
         # Dynamic ArUco ROI - osobny ROI dla każdego markera (ID 0, 1, 2, 3)
         self.roi_aruco_dynamic_enabled = True
-        self.roi_aruco_dynamic_margin = 60  # piksele marginesu wokół każdego markera
+        self.roi_aruco_dynamic_margin = 30  # piksele marginesu wokół każdego markera
         self._last_aruco_positions = {}  # {marker_id: (x, y)} ostatnie pozycje
         self._aruco_marker_miss_count = {}  # {marker_id: count} licznik brakujących klatek
         self._aruco_roi_miss_max = 10  # po ilu klatkach wrócić do pełnego obrazu dla danego markera

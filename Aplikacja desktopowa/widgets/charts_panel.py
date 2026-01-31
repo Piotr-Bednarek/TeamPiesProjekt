@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
 
 # Try importing pyqtgraph; if it fails (e.g. Python 3.14 numpy issues), fallback to dummy
@@ -66,19 +66,33 @@ class ChartsPanel(QWidget):
 
         layout.addWidget(self.plot_error, stretch=1)
 
-        # --- Chart 3: Control & Beam Angle ---
+        # --- Horizontal layout for Control and Beam Angle ---
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(10)
+
+        # --- Chart 3: Control Signal ---
         self.plot_ctrl = pg.PlotWidget()
         self.plot_ctrl.showGrid(x=False, y=True, alpha=0.3)
         self.plot_ctrl.setMouseEnabled(x=False, y=True)
-        self.plot_ctrl.setTitle("Sygnał Sterujący / Kąt Belki", color="#94a3b8", size="10pt")
+        self.plot_ctrl.setTitle("Sygnał Sterujący [°]", color="#94a3b8", size="10pt")
+        self.plot_ctrl.setYRange(-20, 20, padding=0.1)
 
-        self.curve_ctrl = self.plot_ctrl.plot(pen=pg.mkPen(color="#3498db", width=2), name="Sterowanie")
-        self.curve_beam = self.plot_ctrl.plot(pen=pg.mkPen(color="#f59e0b", width=2, style=Qt.DashLine), name="Kąt belki")
+        self.curve_ctrl = self.plot_ctrl.plot(pen=pg.mkPen(color="#3498db", width=2))
 
-        # Add legend
-        self.plot_ctrl.addLegend(offset=(5, 5))
+        bottom_row.addWidget(self.plot_ctrl)
 
-        layout.addWidget(self.plot_ctrl, stretch=1)
+        # --- Chart 4: Beam Angle ---
+        self.plot_beam = pg.PlotWidget()
+        self.plot_beam.showGrid(x=False, y=True, alpha=0.3)
+        self.plot_beam.setMouseEnabled(x=False, y=True)
+        self.plot_beam.setTitle("Kąt Belki [°]", color="#94a3b8", size="10pt")
+        self.plot_beam.setYRange(-15, 15, padding=0.1)
+
+        self.curve_beam = self.plot_beam.plot(pen=pg.mkPen(color="#f59e0b", width=2))
+
+        bottom_row.addWidget(self.plot_beam)
+
+        layout.addLayout(bottom_row, stretch=1)
 
         # Data Buffers (fixed length for performance)
         self.max_points = 200
@@ -103,7 +117,7 @@ class ChartsPanel(QWidget):
         sets = [d["setpoint"] for d in view_data]
         errs = [d["error"] for d in view_data]
         ctrls = [d["control"] for d in view_data]
-        beams = [d.get("beam_angle", 0) * 10 for d in view_data]  # Scale beam angle for visibility (x10)
+        beams = [d.get("beam_angle", 0) for d in view_data]  # Real beam angle in degrees
 
         # Update curves
         self.curve_dist.setData(dists)

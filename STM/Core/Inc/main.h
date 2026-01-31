@@ -139,22 +139,29 @@ void Error_Handler(void);
 #define SENSOR_TEST_MODE   0
 #define USE_CALIBRATION    1
 
-// --- Servo Configuration ---
-#define SERVO_CENTER       100.0f
-#define SERVO_MIN_LIMIT    70.0f
-#define SERVO_MAX_LIMIT    130.0f
-#define SERVO_SLEW_RATE    1000.0f
-#define SERVO_ANGLE_DEADBAND 0.5f
+// --- Servo Configuration (in DEGREES, center = 0°) ---
+#define SERVO_CENTER_DEG   0.0f      // Środek = poziomo
+#define SERVO_MIN_DEG     -30.0f     // Limit lewy (stare 70)
+#define SERVO_MAX_DEG      30.0f     // Limit prawy (stare 130)
+#define SERVO_SLEW_RATE    250.0f    // Stopni na sekundę (było 1000 jednostek/s)
+#define SERVO_ANGLE_DEADBAND 0.3f    // Stopnie
 #define SERVO_SMOOTHING_SIZE 2
 
 // --- Servo Hardware (PWM) ---
-#define SERVO_MIN_CCR      500
-#define SERVO_MAX_CCR      2500
-#define SERVO_MAX_ANGLE    200
+#define SERVO_PWM_MIN      500       // 500μs = -90°
+#define SERVO_PWM_CENTER   1500      // 1500μs = 0°
+#define SERVO_PWM_MAX      2500      // 2500μs = +90°
+#define SERVO_PWM_RANGE    90.0f     // ±90° zakres fizyczny serwa
+
+// --- Compatibility macros (for gradual migration) ---
+// Stare nazwy -> nowe wartości (do usunięcia po pełnej migracji)
+#define SERVO_CENTER       SERVO_CENTER_DEG   // 0° (było 100)
+#define SERVO_MIN_LIMIT    SERVO_MIN_DEG      // -30° (było 70)  
+#define SERVO_MAX_LIMIT    SERVO_MAX_DEG      // +30° (było 130)
 
 // --- PID & Filtration ---
-#define D_DEADBAND         0.5f
-#define D_FILTER_ALPHA     0.3f
+#define D_DEADBAND         0.1f
+#define D_FILTER_ALPHA     0.4f
 
 // --- LED Error Bar ---
 #define LED_ERR_PORT      GPIOE

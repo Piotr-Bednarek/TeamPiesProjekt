@@ -1,0 +1,40 @@
+{
+  "pid": {
+    "ekstra bomba ekstra": {
+      "kp": 0.44,
+      "ki": 0.0064,
+      "kd": 5.0
+    },
+    "bardzo dobre nastawy 1221": {
+      "kp": 0.26,
+      "ki": 0.0064,
+      "kd": 4.4
+    }
+  },
+  "lqr": {
+    "fajne wagi lqr 1": {
+      "Q_x": 139.0,
+      "Q_v": 1.0,
+      "Q_theta": 1.0,
+      "R": 11.0
+    },
+    "mega fajne": {
+      "Q_x": 136.0,
+      "Q_v": 1.0,
+      "Q_theta": 1.0,
+      "R": 9.0
+    },
+    "najlepsze": {
+      "Q_x": 136.0,
+      "Q_v": 1.0,
+      "Q_theta": 1.0,
+      "R": 20.0
+    },
+    "test1": {
+      "Q_x": 142.0,
+      "Q_v": 1.0,
+      "Q_theta": 1.0,
+      "R": 17.0
+    }
+  }
+}

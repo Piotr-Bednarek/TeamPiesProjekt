@@ -1,5 +1,6 @@
 import os
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QHBoxLayout, QPushButton, QButtonGroup, QGridLayout, QFrame, QRadioButton, QComboBox, QLineEdit, QMessageBox, QInputDialog
+import json
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QHBoxLayout, QPushButton, QButtonGroup, QGridLayout, QFrame, QRadioButton, QComboBox, QLineEdit, QMessageBox, QInputDialog, QDoubleSpinBox
 from PySide6.QtCore import Qt, Signal, QTimer
 from widgets.beam_visualizer import BeamVisualizer
 
@@ -76,6 +77,10 @@ class ControlPanel(QWidget):
     calibration_update = Signal(int, float, float)
     mode_update = Signal(int)
     pid_mode_update = Signal(int)
+    # LQR signals
+    lqr_k1_update = Signal(float)
+    lqr_k2_update = Signal(float)
+    lqr_k3_update = Signal(float)
 
     def __init__(self):
         super().__init__()
@@ -151,10 +156,10 @@ class ControlPanel(QWidget):
         self.layout.addWidget(controller_mode_group)
 
         # === PID Parameters ===
-        pid_group = QFrame()
-        pid_group.setObjectName("pidGroup")
-        pid_group.setStyleSheet("#pidGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
-        pid_layout = QVBoxLayout(pid_group)
+        self.pid_group = QFrame()
+        self.pid_group.setObjectName("pidGroup")
+        self.pid_group.setStyleSheet("#pidGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
+        pid_layout = QVBoxLayout(self.pid_group)
         pid_layout.setContentsMargins(5, 5, 5, 5)
         pid_layout.setSpacing(5)
 
@@ -179,11 +184,90 @@ class ControlPanel(QWidget):
         pid_layout.addWidget(self.sli_ki)
         pid_layout.addWidget(self.sli_kd)
 
-        self.layout.addWidget(pid_group)
+        self.layout.addWidget(self.pid_group)
 
-        # === Presets ===
-        self.presets_file = os.path.join(os.path.dirname(__file__), "..", "pid_presets.txt")
-        self.presets = {}
+        # === LQR Parameters (hidden by default) ===
+        self.lqr_group = QFrame()
+        self.lqr_group.setObjectName("lqrGroup")
+        self.lqr_group.setStyleSheet("#lqrGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
+        lqr_layout = QVBoxLayout(self.lqr_group)
+        lqr_layout.setContentsMargins(5, 5, 5, 5)
+        lqr_layout.setSpacing(5)
+
+        lqr_label = QLabel("PARAMETRY LQR")
+        lqr_label.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 11px;")
+        lqr_layout.addWidget(lqr_label)
+
+        # Q weights row
+        q_row = QHBoxLayout()
+        q_row.setSpacing(8)
+        q_row.addWidget(QLabel("Q:"))
+        
+        self.spin_q_x = QDoubleSpinBox()
+        self.spin_q_x.setRange(1, 10000)
+        self.spin_q_x.setValue(100)
+        self.spin_q_x.setPrefix("x=")
+        self.spin_q_x.setStyleSheet("background-color: #222; color: white; border: 1px solid #a78bfa;")
+        q_row.addWidget(self.spin_q_x)
+
+        self.spin_q_v = QDoubleSpinBox()
+        self.spin_q_v.setRange(0, 1000)
+        self.spin_q_v.setValue(10)
+        self.spin_q_v.setPrefix("v=")
+        self.spin_q_v.setStyleSheet("background-color: #222; color: white; border: 1px solid #a78bfa;")
+        q_row.addWidget(self.spin_q_v)
+
+        self.spin_q_theta = QDoubleSpinBox()
+        self.spin_q_theta.setRange(0, 100)
+        self.spin_q_theta.setValue(1)
+        self.spin_q_theta.setPrefix("θ=")
+        self.spin_q_theta.setStyleSheet("background-color: #222; color: white; border: 1px solid #a78bfa;")
+        q_row.addWidget(self.spin_q_theta)
+        lqr_layout.addLayout(q_row)
+
+        # R weight and T_servo row
+        r_row = QHBoxLayout()
+        r_row.setSpacing(8)
+        r_row.addWidget(QLabel("R:"))
+        
+        self.spin_r = QDoubleSpinBox()
+        self.spin_r.setRange(1, 10000)
+        self.spin_r.setValue(100)
+        self.spin_r.setStyleSheet("background-color: #222; color: white; border: 1px solid #a78bfa;")
+        r_row.addWidget(self.spin_r)
+        lqr_layout.addLayout(r_row)
+
+        # Calculated K display
+        self.lbl_k_values = QLabel("K = [-, -, -]")
+        self.lbl_k_values.setStyleSheet("color: #22c55e; font-family: monospace; font-weight: bold; font-size: 12px;")
+        lqr_layout.addWidget(self.lbl_k_values)
+
+        # Calculate and Send button
+        self.btn_calculate_lqr = QPushButton("OBLICZ I WYŚLIJ K")
+        self.btn_calculate_lqr.setFixedHeight(35)
+        self.btn_calculate_lqr.setStyleSheet(
+            """
+            QPushButton { 
+                background-color: #7c3aed; 
+                color: white; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #6d28d9; }
+        """
+        )
+        self.btn_calculate_lqr.clicked.connect(self._on_calculate_lqr)
+        lqr_layout.addWidget(self.btn_calculate_lqr)
+
+        self.layout.addWidget(self.lqr_group)
+        self.lqr_group.hide()  # Hidden by default (PID mode)
+
+        # === Presets (JSON format) ===
+        self.presets_file = os.path.join(os.path.dirname(__file__), "..", "presets.json")
+        self.presets = {}      # PID presets: {"name": {"kp": x, "ki": y, "kd": z}}
+        self.lqr_presets = {}  # LQR presets: {"name": {"Q_x": x, "Q_v": y, "Q_theta": z, "R": r}}
         self._load_presets()
 
         presets_group = QFrame()
@@ -222,11 +306,58 @@ class ControlPanel(QWidget):
         self.btn_delete_preset.setStyleSheet("background-color: #ef4444;")
         self.btn_delete_preset.clicked.connect(self._delete_preset)
 
+
         action_row.addWidget(self.btn_save_preset, 1)
         action_row.addWidget(self.btn_delete_preset)
         presets_layout.addLayout(action_row)
 
-        self.layout.addWidget(presets_group)
+        self.pid_presets_group = presets_group  # Rename for clarity
+        self.layout.addWidget(self.pid_presets_group)
+
+        # === LQR Presets Panel (identical layout) ===
+        lqr_presets_group = QFrame()
+        lqr_presets_group.setObjectName("lqrPresetsGroup")
+        lqr_presets_group.setStyleSheet("#lqrPresetsGroup { background-color: #1a1f2e; border: 1px solid #334155; border-radius: 8px; }")
+        lqr_presets_layout = QVBoxLayout(lqr_presets_group)
+        lqr_presets_layout.setContentsMargins(5, 5, 5, 5)
+        lqr_presets_layout.setSpacing(5)
+
+        lqr_presets_label = QLabel("ZESTAWY LQR")
+        lqr_presets_label.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 11px;")
+        lqr_presets_layout.addWidget(lqr_presets_label)
+
+        lqr_dropdown_row = QHBoxLayout()
+        self.lqr_presets_combo = QComboBox()
+        self.lqr_presets_combo.setMinimumWidth(120)
+        self.lqr_presets_combo.addItem("-- Wybierz --")
+        for name in self.lqr_presets.keys():
+            self.lqr_presets_combo.addItem(name)
+
+        self.btn_apply_lqr_preset = QPushButton("Zastosuj")
+        self.btn_apply_lqr_preset.setStyleSheet("background-color: #3b82f6;")
+        self.btn_apply_lqr_preset.clicked.connect(self._load_lqr_preset)
+
+        lqr_dropdown_row.addWidget(self.lqr_presets_combo, 1)
+        lqr_dropdown_row.addWidget(self.btn_apply_lqr_preset)
+        lqr_presets_layout.addLayout(lqr_dropdown_row)
+
+        lqr_action_row = QHBoxLayout()
+        self.btn_save_lqr = QPushButton("Zapisz obecne")
+        self.btn_save_lqr.setStyleSheet("background-color: #22c55e;")
+        self.btn_save_lqr.clicked.connect(self._save_lqr_preset)
+
+        self.btn_delete_lqr = QPushButton("Usuń")
+        self.btn_delete_lqr.setStyleSheet("background-color: #ef4444;")
+        self.btn_delete_lqr.clicked.connect(self._delete_lqr_preset)
+
+        lqr_action_row.addWidget(self.btn_save_lqr, 1)
+        lqr_action_row.addWidget(self.btn_delete_lqr)
+        lqr_presets_layout.addLayout(lqr_action_row)
+
+        self.lqr_presets_group = lqr_presets_group
+        self.layout.addWidget(self.lqr_presets_group)
+        self.lqr_presets_group.hide()  # Hidden by default (PID mode)
+
         self.layout.addStretch()
 
         self.current_raw_distance = 0
@@ -245,32 +376,77 @@ class ControlPanel(QWidget):
 
     def _on_controller_mode_change(self, mode_id):
         self.pid_mode_update.emit(mode_id)
+        # Toggle visibility of PID/LQR panels AND presets panels
+        if mode_id == 0:  # Custom PID
+            self.pid_group.show()
+            self.lqr_group.hide()
+            self.pid_presets_group.show()
+            self.lqr_presets_group.hide()
+        else:  # LQR
+            self.pid_group.hide()
+            self.lqr_group.show()
+            self.pid_presets_group.hide()
+            self.lqr_presets_group.show()
+
+    def _on_calculate_lqr(self):
+        """Calculate LQR gains and send to STM32"""
+        try:
+            from utils.lqr_calculator import compute_lqr_gains, validate_lqr_params
+            
+            Q_x = self.spin_q_x.value()
+            Q_v = self.spin_q_v.value()
+            Q_theta = self.spin_q_theta.value()
+            R = self.spin_r.value()
+            T_servo = 0.1  # Stała czasowa serwa - wartość stała
+            
+            # Validate
+            is_valid, error_msg = validate_lqr_params(Q_x, Q_v, Q_theta, R, T_servo)
+            if not is_valid:
+                QMessageBox.warning(self, "Błąd parametrów", error_msg)
+                return
+            
+            # Calculate
+            K1, K2, K3 = compute_lqr_gains(Q_x, Q_v, Q_theta, R, T_servo)
+            
+            # Update display
+            self.lbl_k_values.setText(f"K = [{K1:.4f}, {K2:.4f}, {K3:.4f}]")
+            
+            # Send to STM32
+            self.lqr_k1_update.emit(K1)
+            QTimer.singleShot(100, lambda: self.lqr_k2_update.emit(K2))
+            QTimer.singleShot(200, lambda: self.lqr_k3_update.emit(K3))
+            
+        except ImportError:
+            QMessageBox.critical(self, "Błąd", "Brak modułu scipy. Zainstaluj: pip install scipy")
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd obliczeń", str(e))
 
     def _on_mode_change(self, btn_id):
         self.pid_mode_update.emit(btn_id)
 
+
     def _load_presets(self):
+        """Wczytuje presety PID i LQR z pliku JSON"""
         self.presets = {}
+        self.lqr_presets = {}
         if os.path.exists(self.presets_file):
             try:
                 with open(self.presets_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        parts = line.split(";")
-                        if len(parts) == 4:
-                            name, kp, ki, kd = parts
-                            self.presets[name] = (float(kp), float(ki), float(kd))
+                    data = json.load(f)
+                    self.presets = data.get("pid", {})
+                    self.lqr_presets = data.get("lqr", {})
             except Exception as e:
                 print(f"Błąd wczytywania presetów: {e}")
 
     def _save_presets_to_file(self):
+        """Zapisuje presety PID i LQR do pliku JSON"""
         try:
+            data = {
+                "pid": self.presets,
+                "lqr": self.lqr_presets
+            }
             with open(self.presets_file, "w", encoding="utf-8") as f:
-                f.write("# Zestawy PID: nazwa;Kp;Ki;Kd\n")
-                for name, (kp, ki, kd) in self.presets.items():
-                    f.write(f"{name};{kp};{ki};{kd}\n")
+                json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             QMessageBox.critical(self, "Błąd", f"Nie można zapisać pliku: {e}")
 
@@ -282,7 +458,10 @@ class ControlPanel(QWidget):
         if name == "-- Wybierz --" or name not in self.presets:
             return
 
-        kp, ki, kd = self.presets[name]
+        preset = self.presets[name]
+        kp = preset["kp"]
+        ki = preset["ki"]
+        kd = preset["kd"]
 
         self.sli_kp.set_value(kp)
         self.sli_ki.set_value(ki)
@@ -318,7 +497,7 @@ class ControlPanel(QWidget):
         else:
             self.presets_combo.addItem(name)
 
-        self.presets[name] = (kp, ki, kd)
+        self.presets[name] = {"kp": kp, "ki": ki, "kd": kd}
         self._save_presets_to_file()
         self.presets_combo.setCurrentText(name)
 
@@ -375,3 +554,69 @@ class ControlPanel(QWidget):
     def update_data(self, data):
         self.viz.set_data(data.get("filtered", 0), data.get("setpoint", 125))
         self.current_raw_distance = data.get("distance", 0)
+
+    # === LQR Preset Functions ===
+
+    def _load_lqr_preset(self):
+        """Wczytuje wybrany preset LQR do spinboxów"""
+        name = self.lqr_presets_combo.currentText()
+        if name == "-- Wybierz --" or name not in self.lqr_presets:
+            return
+        
+        preset = self.lqr_presets[name]
+        self.spin_q_x.setValue(preset.get("Q_x", 100))
+        self.spin_q_v.setValue(preset.get("Q_v", 10))
+        self.spin_q_theta.setValue(preset.get("Q_theta", 1))
+        self.spin_r.setValue(preset.get("R", 100))
+
+    def _save_lqr_preset(self):
+        """Zapisuje obecne wartości LQR jako preset"""
+        name, ok = QInputDialog.getText(self, "Zapisz zestaw LQR", "Podaj nazwę dla zestawu:")
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+
+        if name in self.lqr_presets:
+            reply = QMessageBox.question(self, "Potwierdź", f"Zestaw '{name}' już istnieje. Nadpisać?", QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+        else:
+            self.lqr_presets_combo.addItem(name)
+
+        self.lqr_presets[name] = {
+            "Q_x": self.spin_q_x.value(),
+            "Q_v": self.spin_q_v.value(),
+            "Q_theta": self.spin_q_theta.value(),
+            "R": self.spin_r.value()
+        }
+        self._save_presets_to_file()
+        self.lqr_presets_combo.setCurrentText(name)
+
+    def _delete_lqr_preset(self):
+        """Usuwa wybrany preset LQR"""
+        name = self.lqr_presets_combo.currentText()
+        if name == "-- Wybierz --" or name not in self.lqr_presets:
+            QMessageBox.warning(self, "Uwaga", "Wybierz zestaw do usunięcia.")
+            return
+
+        reply = QMessageBox.question(self, "Potwierdź", f"Usunąć zestaw '{name}'?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        del self.lqr_presets[name]
+        idx = self.lqr_presets_combo.findText(name)
+        if idx >= 0:
+            self.lqr_presets_combo.removeItem(idx)
+        self._save_presets_to_file()
+
+    def _populate_preset_combos(self):
+        """Wypełnia combo presety po wczytaniu z pliku"""
+        # PID presets
+        for name in self.presets.keys():
+            if self.presets_combo.findText(name) == -1:
+                self.presets_combo.addItem(name)
+        # LQR presets
+        for name in self.lqr_presets.keys():
+            if self.lqr_presets_combo.findText(name) == -1:
+                self.lqr_presets_combo.addItem(name)
