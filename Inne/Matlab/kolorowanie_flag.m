@@ -39,3 +39,6 @@ if ~isempty(all_blocks)
 else
     disp('Nie znaleziono bloków Goto/From.');
 end
+
+
+disp('Piotrek jebie śledziem');
