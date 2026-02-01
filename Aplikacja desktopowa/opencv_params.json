@@ -13,9 +13,9 @@
         "adaptive_const": 1,
         "min_size": 0.001,
         "min_area": 0,
-        "brightness": -46,
+        "brightness": 36,
         "contrast": 3.0,
-        "gamma": 0.32,
+        "gamma": 0.1,
         "error_correction": 1.0,
         "corner_refine": true,
         "upscale_enabled": true,
@@ -24,8 +24,8 @@
         "apriltag_refine": true
     },
     "calibration": {
-        "min": 0.020455570742743255,
-        "max": 0.9745493250435047,
+        "min": 0.038979109361814514,
+        "max": 0.9895753467904568,
         "angle_offset": 0.0,
         "angle_method": 0
     }

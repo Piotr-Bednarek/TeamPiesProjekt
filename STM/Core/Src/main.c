@@ -115,9 +115,9 @@ volatile uint8_t rx_idx = 0;
 
 // Główne zmienne sterujące
 volatile float g_setpoint = 125.0f;
-volatile float g_Kp = 0.44f;
-volatile float g_Ki = 0.0053f;
-volatile float g_Kd = 5.0f;
+volatile float g_Kp = 0.26f;
+volatile float g_Ki = 0.0064f;
+volatile float g_Kd = 4.4f;
 
 // Zmienne kalibracji
 // volatile uint8_t calibration_mode = 0;
@@ -138,11 +138,8 @@ float err_sum = 0.0f;
 // Tryb sterowania: 0 = GUI (Manual), 1 = Analog (Potencjometr)
 volatile uint8_t control_mode = 0;
 
-
-
 // Start/Stop regulatora: 0 = wyłączony, 1 = włączony (domyślnie)
 volatile uint8_t g_regulator_enabled = 1;
-
 
 // Kontroler ServoPID (nasza implementacja) - domyślny
 ServoPID_Controller g_servo_pid;

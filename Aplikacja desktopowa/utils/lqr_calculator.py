@@ -7,6 +7,11 @@ import numpy as np
 from scipy.linalg import solve_continuous_are
 
 
+# slew_rate -> T_servo
+# 150 stopni na sekunde ->
+# 200 stopni na sekunde ->
+# 250 stopni na sekunde ->
+# 300 stopni na sekunde -> 0.095 s
 def compute_lqr_gains(Q_x: float, Q_v: float, Q_theta: float, R: float, T_servo: float = 0.095, g: float = 9.81):
     """
     Oblicza wzmocnienia K dla regulatora LQR.
@@ -30,10 +35,10 @@ def compute_lqr_gains(Q_x: float, Q_v: float, Q_theta: float, R: float, T_servo:
             K3 - wzmocnienie dla kąta belki
     """
     c_ball = (3.0 / 5.0) * g  # ~5.9 m/s^2/rad (dla toczącej się kulki)
-    k_mech = 0.2
+    k_mech = 1
 
     # Macierz stanu A
-    A = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, k_mech * c_ball], [0.0, 0.0, -1.0 / T_servo]])
+    A = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, -k_mech * c_ball], [0.0, 0.0, -1.0 / T_servo]])
 
     # Macierz wejścia B
     B = np.array([[0.0], [0.0], [1.0 / T_servo]])
