@@ -60,6 +60,12 @@ Rozpatrując dynamikę piłeczki na belce, wyprowadzamy równanie wiążące ką
 
 \subsubsection{II Zasada Dynamiki $F=ma$}
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{source/2-model/2-model-img/silybelka.png}
+  \caption{Rozkład sił działajacych na kule na równi pochyłej}
+\end{figure}
+
 Patrzmy na siły działające wzdłuż belki:
 \begin{itemize}
   \item Grawitacja ($F_g$): Jej składowa równoległa do belki wynosi $m \cdot g \cdot \sin(\theta)$.
@@ -193,8 +199,13 @@ połączenie między nimi.
 
 \subsubsection{Zależnośc pomiedzy $\Theta_{serwo}$ i $\Theta_{beam}$}
 
-Wał serwa jest połączony z belką za pośrednictwem mechanicznego połączenia. 
-Zakładając idealne połączenie, obowiązuje 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{source/2-model/2-model-img/kmech.png}
+  \caption{fizyczne mechaniczne połączenie pomiedzy serwem i belką}
+\end{figure}
+ 
+Zakładając idealne połączenie pomiedzy serwem i belką, obowiązuje 
 następująca zależność kinematyczna:
 
 \[
@@ -203,10 +214,8 @@ r_{\mathrm{serwo}} \cdot \theta_{\mathrm{serwo}} = r_{\mathrm{belka}} \cdot \the
 
 gdzie:
 \begin{itemize}
-  \item $r_{\mathrm{serwo}}$ -- promień dźwigni na wale serwa,
-  \item $\theta_{\mathrm{serwo}}$ -- kąt obrotu serwa $[\mathrm{rad}]$,
+  \item $r_{\mathrm{serwo}}$ -- promień dźwigni na wale serwa($3\,\mathrm{cm}$),
   \item $r_{\mathrm{belka}}$ -- promień dźwigni na wale belki($15\,\mathrm{cm}$),
-  \item $\theta_{\mathrm{belka}}$ -- kąt wychylenia belki $[\mathrm{rad}]$.
 \end{itemize}
 
 Stąd wynika relacja kątów:
@@ -231,20 +240,12 @@ Dla połączenia szeregowego bez sprzężeń zwrotnych, ścieżka sygnału przeb
 U(s) \xrightarrow{G_{\mathrm{serwo}}} \Theta_{\mathrm{serwo}}(s) \xrightarrow{k_{mech}} \Theta_{\mathrm{belka}}(s) \xrightarrow{G_{\mathrm{ball}}} X(s)
 \]
 
-Transmitancja całego systemu wynosi iloczyn transmitancji na każdym odcinku:
-
-\[
-G_{\mathrm{total}}(s) = \frac{X(s)}{U(s)} = G_{\mathrm{serwo}}(s) \cdot k_{mech} \cdot G_{\mathrm{ball}}(s)
-\]
-
-\paragraph{Wyjaśnienie pojawienia się $k_{mech}$ w liczniku:}
-
 Transmitancja piłeczki wynosi:
 \[
 G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)}
 \]
 
-Jednak $\Theta_{\mathrm{belka}}$ nie jest bezpośrednie wyjściem serwa. Musimy podstawić 
+ Musimy podstawić 
 relację $\Theta_{\mathrm{belka}}(s) = k_{mech} \cdot \Theta_{\mathrm{serwo}}(s)$:
 
 \[
@@ -303,13 +304,6 @@ y = x_1
 gdzie $x_1 = x$ (położenie piłeczki), $x_2 = \dot{x}$ (prędkość piłeczki), 
 $x_3 = \theta_{\mathrm{serwo}}$ (kąt serwa), a $u = U(s)$ to sygnał wejściowy (napięcie).
 
-\subsubsection{Podsumowanie}
-
-Transmitancja całego systemu łączy dynamikę serwa (czlon inercyjny I rzędu) 
-z dynamiką piłeczki na belce (dwa całkowujące człony $s^2$), tworząc system 
-trzeciego rzędu. Przełożenie mechaniczne $n$ amplifikuje efekt serwa na wychylenie 
-belki, natomiast inercja serwa charakteryzowana przez $T_{\mathrm{serwo}}$ opóźnia 
-odpowiedź całego systemu.
 
 
 
