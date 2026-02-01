@@ -1,1 +1,35 @@
 \section{Sterowalność}
+
+\subsection{Macierz sterowalności}
+
+\begin{equation}
+\mathcal{C} = \begin{bmatrix} B & AB & A^2 B \end{bmatrix}
+\end{equation}
+
+Macierz sterowalności przyjmuje postać:
+
+\begin{equation}
+\mathcal{C} = \begin{bmatrix} 0 & 0 & 12{,}389 \\ 0 & 12{,}389 & -110{,}796 \\ 10{,}526 & -110{,}796 & 1{,}166 \times 10^3 \end{bmatrix}
+\end{equation}
+
+\subsection{Rząd macierzy sterowalności}
+
+Aby zbadać rząd macierzy, obliczamy jej wyznacznik:
+
+\begin{equation}
+\det(\mathcal{C}) = 0 \cdot \begin{vmatrix} 12{,}389 & -110{,}796 \\ -110{,}796 & 1{,}166 \times 10^3 \end{vmatrix} - 0 \cdot \begin{vmatrix} 0 & -110{,}796 \\ 10{,}526 & 1{,}166 \times 10^3 \end{vmatrix} + 12{,}389 \cdot \begin{vmatrix} 0 & 12{,}389 \\ 10{,}526 & -110{,}796 \end{vmatrix}
+\end{equation}
+
+Obliczając podwyznacznik:
+
+\begin{equation}
+\begin{vmatrix} 0 & 12{,}389 \\ 10{,}526 & -110{,}796 \end{vmatrix} = 0 \cdot (-110{,}796) - 12{,}389 \cdot 10{,}526 = -130{,}380
+\end{equation}
+
+Stąd:
+
+\begin{equation}
+\det(\mathcal{C}) = 12{,}389 \times (-130{,}380) \approx -1614
+\end{equation}
+
+Ponieważ $\det(\mathcal{C}) \neq 0$, macierz sterowalności ma pełny rząd 3. Układ jest w pełni sterowalny co jest warunkiem koniecznym do zaprojektowania sprawnego regulatora.
