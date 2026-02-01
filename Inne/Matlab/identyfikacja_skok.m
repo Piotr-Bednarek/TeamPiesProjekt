@@ -1,5 +1,8 @@
-clear; clc;
+clear;
+close all;
+clc;
 
+s= tf('s');
 %Parametry regulatora
 Ti=1;
 Kp=1;
@@ -7,22 +10,18 @@ Td=1;
 
 
 % --- KONFIGURACJA ---
-A_stopnie = 20;          % Jaki skok zadałeś w eksperymencie (w stopniach)?
+A_stopnie = 25;          % Jaki skok zadałeś w eksperymencie (w stopniach)?
 %A_rad = deg2rad(A_stopnie); % Przeliczamy na radiany (fizyka lubi radiany!)
 
 % --- WCZYTANIE DANYCH ---
-data = readmatrix('wychylenie-120.csv'); 
+data = readmatrix('wychylenie-125.csv'); 
 t_raw = data(:, 1);     % Czas
 y_raw = data(:, 3);     % Pozycja kulki [m] (upewnij się że metry, nie mm!)
 
-% --- PRZYGOTOWANIE DANYCH (Wycinanie) ---
-% Musisz wybrać fragment, gdzie kulka faktycznie jedzie (jest parabolą)
-% Zazwyczaj robi się to ręcznie patrząc na wykres, np.:
-
 plot(t_raw, y_raw); title('Znajdź zakres czasu startu i końca');
 
-% Załóżmy, że ruch jest od 2.5s do 4.0s (zmień to pod swoje dane!)
-idx = t_raw > 1.5 & t_raw < 2.5; 
+
+idx = t_raw > 1.1 & t_raw < 2.2; 
 
 t = t_raw(idx);
 y = y_raw(idx);
@@ -52,3 +51,11 @@ plot(t, y, 'b.', t, y_model, 'r-', 'LineWidth', 2);
 legend('Dane pomiarowe', 'Dopasowana parabola');
 title(['Dopasowanie modelu K/s^2. K = ' num2str(K_obl)]);
 grid on;
+
+
+G= K_obl/(s^(2));
+% sys= ss(G)
+% 
+% A= sys.A
+% B= sys.B
+% C= sys.C
