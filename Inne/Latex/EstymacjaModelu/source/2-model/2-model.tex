@@ -246,63 +246,53 @@ G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)}
 \]
 
  Musimy podstawić 
-relację $\Theta_{\mathrm{belka}}(s) = k_{mech} \cdot \Theta_{\mathrm{serwo}}(s)$:
+relację $\Theta_{\mathrm{belka}}(s) = k_{\mathrm{mech}} \cdot \Theta_{\mathrm{serwo}}(s)$:
 
 \[
-G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)} = \frac{X(s)}{k_{mech} \cdot \Theta_{\mathrm{serwo}}(s)} 
+G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)} = \frac{X(s)}{k_{\mathrm{mech}} \cdot \Theta_{\mathrm{serwo}}(s)} 
 \]
 
 Stąd wynika:
 \[
-X(s) = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot \Theta_{\mathrm{serwo}}(s)
+X(s) = k_{\mathrm{mech}h} \cdot G_{\mathrm{ball}}(s) \cdot \Theta_{\mathrm{serwo}}(s)
 \]
 
 Teraz, znając że $\Theta_{\mathrm{serwo}}(s) = G_{\mathrm{serwo}}(s) \cdot U(s)$, mamy:
 
 \[
-X(s) = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s) \cdot U(s)
+X(s) = k_{\mathrm{mech}} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s) \cdot U(s)
 \]
 
 Stąd transmitancja całkowita:
 
 \[
-G_{\mathrm{total}}(s) = \frac{X(s)}{U(s)} = k_{mech} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s)
+G_{\mathrm{total}}(s) = \frac{X(s)}{U(s)} = k_{\mathrm{mech}} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s)
 \]
 
 Podstawiając transmitancje:
 
 \[
-G_{\mathrm{total}}(s) = k_{mech} \cdot \frac{c_{\mathrm{ball}}}{s^2} \cdot \frac{1}{T_{\mathrm{serwo}} s + 1}
+G_{\mathrm{total}}(s) = k_{\mathrm{mech}} \cdot \frac{c_{\mathrm{ball}}}{s^2} \cdot \frac{1}{T_{\mathrm{serwo}} s + 1}
 \]
 
 \subsubsection{Ostateczna Forma Transmitancji Całego Układu}
 
 \[
-G_{\mathrm{total}}(s) =\frac{k_{mech} \cdot c_{\mathrm{ball}}}{s^2 \cdot (T_{\mathrm{serwo}} s + 1)}
+G_{\mathrm{total}}(s) =\frac{k_{\mathrm{mech}} \cdot c_{\mathrm{ball}}}{s^2 \cdot (T_{\mathrm{serwo}} s + 1)}
 \]
 
 Rozwijając mianownik:
 
 \[
-G_{\mathrm{total}}(s) = \frac{k_{mech} \cdot c_{\mathrm{ball}}}{T_{\mathrm{serwo}} s^3 + s^2}
+G_{\mathrm{total}}(s) = \frac{k_{\mathrm{mech}} \cdot c_{\mathrm{ball}}}{T_{\mathrm{serwo}} s^3 + s^2}
 \]
 
-\paragraph{Równanie w Przestrzeni Stanów:}
-
-Transmitancja trzeciego rzędu może być również reprezentowana w postaci równań 
-stanu, które są wygodne do symulacji numerycznej:
-
-\[
-\begin{cases}
-\dot{x}_1 = x_2 \\
-\dot{x}_2 = x_3 \\
-\dot{x}_3 = -\frac{1}{T_{\mathrm{serwo}}} x_3 + \frac{n \cdot c_{\mathrm{ball}}}{T_{\mathrm{serwo}}} u \\
-y = x_1
-\end{cases}
-\]
-
-gdzie $x_1 = x$ (położenie piłeczki), $x_2 = \dot{x}$ (prędkość piłeczki), 
-$x_3 = \theta_{\mathrm{serwo}}$ (kąt serwa), a $u = U(s)$ to sygnał wejściowy (napięcie).
+Gdzie:
+\begin{itemize}
+  \item $k_{\mathrm{mech}}=\frac{3cm}{15cm}=0,2$
+  \item $c_{\mathrm{ball}}=5,586$
+  \item $T_{\mathrm{serwo}}=0.095$
+\end{itemize}
 
 
 
