@@ -1,2 +1,154 @@
 \section{Równania stanu}
 
+\subsection{Wektor Stanu}
+
+Jako wektor równań stanu przyjęto:
+
+\begin{equation}
+\mathbf{x}=\begin{bmatrix}
+    x \\ \dot{x} \\ \theta
+\end{bmatrix}
+\end{equation}
+
+Ze względu na praktyczną implementację układu sterowania, konieczne było wybranie zmiennych stanu, które mogą być zmierzone fizycznie w rzeczywistym systemie. Wektor stanu zawiera trzy mierzalne wielkości: położenie piłki ($x$), prędkość piłki ($\dot{x}$) oraz kąt belki ($\theta$). To podejście, choć wymaga bardziej zaawansowanego wyprowadzenia matematycznego, gwarantuje fizyczną interpretowalność każdej zmiennej stanu.
+Kluczowym pytaniem jest: dlaczego nie stosujemy standardowych metod matematycznych (takich jak postać kanoniczna sterowalna)? Odpowiedź jest prosta — metody kanoniczne generują \textbf{stany matematyczne}, które mogą nie mieć fizycznego odpowiednika. W naszym przypadku chcemy, aby trzecia zmienna stanu ($x_3$) reprezentowała kąt belki ($\theta$), a nie przyspieszenie piłki. 
+
+\subsection{Dekompozycja transmitancji}
+
+Mamy transmitancję całkowitą $G(s)$, która wiąże wyjście (pozycję piłki $x$) z
+wejściem (napięciem sterującym $U(s)$). Gdzie, zgodnie z opisem z sekcji
+poprzedniej:
+\begin{align}
+G_{\mathrm{serwo}}(s) &= \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)} = \frac{1}{T_{\mathrm{serwo}} s + 1} \quad \text{(Transmitancja serwa)}\\
+G_{\mathrm{ball}}(s) &= \frac{X(s)}{\Theta_{\mathrm{belka}}(s)} = \frac{c_{\mathrm{ball}}}{s^2} \quad \text{(Transmitancja piłki)}
+\end{align}
+
+Kluczową rolę odgrywa tu przekładnia mechaniczna $k_{\mathrm{mech}} = \frac{r_{\mathrm{serwo}}}{r_{\mathrm{belka}}} = 0{,}2$, która wiąże kąt serwa $\Theta_{\mathrm{serwo}}(s)$ z kątem belki $\Theta_{\mathrm{belka}}(s)$:
+
+\begin{equation}
+\Theta_{\mathrm{belka}}(s) = k_{\mathrm{mech}} \cdot \Theta_{\mathrm{serwo}}(s)
+\end{equation}
+
+\subsection{Wyprowadzenie równań różniczkowych dla każdego bloku}
+
+\subsubsection{Blok Serwa}
+
+\begin{equation}
+    G_{\mathrm{serwo}}(s) = \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)}=\frac{1}{T_{\mathrm{serwo}} s + 1}
+\end{equation}
+
+Mnożymy na krzyż:
+
+\begin{equation}
+(T_{\mathrm{serwo}} s + 1) \Theta_{\mathrm{serwo}}(s) = U(s)
+\end{equation}
+
+Przechodzimy na dziedzinę czasu:
+
+\begin{equation}
+T_{\mathrm{serwo}} \dot{\theta}(t) + \theta(t) = u(t)
+\end{equation}
+
+Wyznaczamy najwyższą pochodną ($\dot{\theta}$):
+
+\begin{equation}
+\dot{\theta}(t) = \frac{1}{T_{\mathrm{serwo}}} u(t) - \frac{1}{T_{\mathrm{serwo}}} \theta(t)
+\label{eq:servo_dynamics}
+\end{equation}
+
+\subsubsection{Blok Piłki}
+
+Z rozdziału drugiego wiemy, że dynamika piłki w zależności od kąta belki jest opisana równaniem:
+
+\begin{equation}
+\ddot{x}(t) = c_{\mathrm{ball}} \cdot \theta_{\mathrm{belka}}(t)
+\label{eq:ball_dynamics}
+\end{equation}
+
+gdzie $c_{\mathrm{ball}} = \frac{g}{1 + \frac{J}{m R^2}}$ jest współczynnikiem charakteryzującym dynamikę piłki na belce, a $\theta_{\mathrm{belka}}$ jest kątem belki.
+
+Wiemy, że kąt belki związany jest z kątem serwa przez przekładnię mechaniczną:
+
+\begin{equation}
+\theta_{\mathrm{belka}}(t) = k_{\mathrm{mech}} \cdot \theta_{\mathrm{serwo}}(t)
+\end{equation}
+
+Stąd:
+
+\begin{equation}
+\ddot{x}(t) = c_{\mathrm{ball}} \cdot k_{\mathrm{mech}} \cdot \theta_{\mathrm{serwo}}(t) 
+\label{eq:ball_dynamics_with_mech}
+\end{equation}
+
+\subsection{Definicja zmiennych stanu}
+
+Chcemy, aby nasz wektor stanu wyglądał tak:
+
+\begin{equation}
+x = \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} = \begin{bmatrix} x \\ \dot{x} \\ \theta \end{bmatrix}
+\end{equation}
+
+Gdzie:
+
+\begin{itemize}
+\item $x_1 = x$ (Pozycja piłki)
+\item $x_2 = \dot{x}$ (Prędkość piłki)
+\item $x_3 = \theta$ (Kąt belki)
+\end{itemize}
+
+\subsection{Zapis pochodnych zmiennych stanu}
+
+\subsubsection{Pochodna pozycji ($\dot{x}_1$)}
+
+Z definicji prędkości:
+
+\begin{equation}
+\dot{x}_1 = \dot{x} = x_2
+\end{equation}
+
+\subsubsection{Pochodna prędkości ($\dot{x}_2$)}
+
+To jest przyspieszenie. Bierzemy je z równania \eqref{eq:ball_dynamics_with_mech}, które uwzględnia przekładnię mechaniczną:
+
+\begin{equation}
+\ddot{x} = k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \cdot \theta_{\mathrm{serwo}}
+\end{equation}
+
+Ponieważ $\theta_{\mathrm{serwo}} = x_3$ (zmienna stanu), podstawiając:
+
+\begin{equation}
+\dot{x}_2 = k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \cdot x_3
+\end{equation}
+
+\subsubsection{Pochodna kąta ($\dot{x}_3$)}
+
+To jest prędkość kątowa serwa. Bierzemy ją z równania \eqref{eq:servo_dynamics}:
+
+\begin{equation}
+\dot{x}_3 = \frac{1}{T_{\mathrm{serwo}}} u - \frac{1}{T_{\mathrm{serwo}}} x_3
+\end{equation}
+
+\subsection{Postać macierzowa}
+
+Układ równań liniowych:
+
+\begin{equation}
+\begin{cases}
+\dot{x}_1 = x_2 \\
+\dot{x}_2 = k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \cdot x_3 \\
+\dot{x}_3 = \frac{1}{T_{\mathrm{serwo}}} u - \frac{1}{T_{\mathrm{serwo}}} x_3
+\end{cases}
+\end{equation}
+
+Zapis macierzowy $\dot{x} = Ax + B u$:
+
+\begin{equation}
+\begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix} = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \\ 0 & 0 & -\frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} + \begin{bmatrix} 0 \\ 0 \\ \frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} u
+\end{equation}
+
+Oraz równanie wyjścia (mierzymy pozycję $x$):
+
+\begin{equation}
+y = \begin{bmatrix} 1 & 0 & 0 \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix}
+\end{equation}
+
