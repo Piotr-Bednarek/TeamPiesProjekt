@@ -11,12 +11,12 @@ Jako wektor równań stanu przyjęto:
 \end{equation}
 
 Ze względu na praktyczną implementację układu sterowania, konieczne było wybranie zmiennych stanu, które mogą być zmierzone fizycznie w rzeczywistym systemie. Wektor stanu zawiera trzy mierzalne wielkości: położenie piłki ($x$), prędkość piłki ($\dot{x}$) oraz kąt belki ($\theta$). To podejście, choć wymaga bardziej zaawansowanego wyprowadzenia matematycznego, gwarantuje fizyczną interpretowalność każdej zmiennej stanu.
-Kluczowym pytaniem jest: dlaczego nie stosujemy standardowych metod matematycznych (takich jak postać kanoniczna sterowalna)? Odpowiedź jest prosta — metody kanoniczne generują \textbf{stany matematyczne}, które mogą nie mieć fizycznego odpowiednika. W naszym przypadku chcemy, aby trzecia zmienna stanu ($x_3$) reprezentowała kąt belki ($\theta$), a nie przyspieszenie piłki. 
+Kluczowym pytaniem jest: dlaczego nie stosuje się standardowych metod matematycznych (takich jak postać kanoniczna sterowalna)? Odpowiedź jest prosta — metody kanoniczne generują \textbf{stany matematyczne}, które mogą nie mieć fizycznego odpowiednika. W tym przypadku pożądane jest, aby trzecia zmienna stanu ($x_3$) reprezentowała kąt belki ($\theta$), a nie przyspieszenie piłki. 
 
 \subsection{Dekompozycja transmitancji}
 
-Mamy transmitancję całkowitą $G(s)$, która wiąże wyjście (pozycję piłki $x$) z
-wejściem (napięciem sterującym $U(s)$). Gdzie, zgodnie z opisem z sekcji
+Określona jest transmitancja całkowita $G(s)$, która wiąże wyjście (pozycję piłki $x$) z
+wejściem (napięciem sterującym $U(s)$). Zgodnie z opisem z sekcji
 poprzedniej:
 \begin{align}
 G_{\mathrm{serwo}}(s) &= \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)} = \frac{1}{T_{\mathrm{serwo}} s + 1} \quad \text{(Transmitancja serwa)}\\
@@ -37,19 +37,19 @@ Kluczową rolę odgrywa tu przekładnia mechaniczna $k_{\mathrm{mech}} = \frac{r
     G_{\mathrm{serwo}}(s) = \frac{\Theta_{\mathrm{serwo}}(s)}{U(s)}=\frac{1}{T_{\mathrm{serwo}} s + 1}
 \end{equation}
 
-Mnożymy na krzyż:
+Mnożąc na krzyż:
 
 \begin{equation}
 (T_{\mathrm{serwo}} s + 1) \Theta_{\mathrm{serwo}}(s) = U(s)
 \end{equation}
 
-Przechodzimy na dziedzinę czasu:
+Przechodząc na dziedzinę czasu:
 
 \begin{equation}
 T_{\mathrm{serwo}} \dot{\theta}(t) + \theta(t) = u(t)
 \end{equation}
 
-Wyznaczamy najwyższą pochodną ($\dot{\theta}$):
+Wyznaczając najwyższą pochodną ($\dot{\theta}$):
 
 \begin{equation}
 \dot{\theta}(t) = \frac{1}{T_{\mathrm{serwo}}} u(t) - \frac{1}{T_{\mathrm{serwo}}} \theta(t)
@@ -58,7 +58,7 @@ Wyznaczamy najwyższą pochodną ($\dot{\theta}$):
 
 \subsubsection{Blok Piłki}
 
-Z rozdziału drugiego wiemy, że dynamika piłki w zależności od kąta belki jest opisana równaniem:
+Z rozdziału drugiego wiadomo, że dynamika piłki w zależności od kąta belki opisana jest równaniem:
 
 \begin{equation}
 \ddot{x}(t) = c_{\mathrm{ball}} \cdot \theta_{\mathrm{belka}}(t)
@@ -67,7 +67,7 @@ Z rozdziału drugiego wiemy, że dynamika piłki w zależności od kąta belki j
 
 gdzie $c_{\mathrm{ball}} = \frac{g}{1 + \frac{J}{m R^2}}$ jest współczynnikiem charakteryzującym dynamikę piłki na belce, a $\theta_{\mathrm{belka}}$ jest kątem belki.
 
-Wiemy, że kąt belki związany jest z kątem serwa przez przekładnię mechaniczną:
+Wiadomo, że kąt belki związany jest z kątem serwa przez przekładnię mechaniczną:
 
 \begin{equation}
 \theta_{\mathrm{belka}}(t) = k_{\mathrm{mech}} \cdot \theta_{\mathrm{serwo}}(t)
@@ -82,7 +82,7 @@ Stąd:
 
 \subsection{Definicja zmiennych stanu}
 
-Chcemy, aby nasz wektor stanu wyglądał tak:
+Pożądane jest, aby wektor stanu przyjął poniższą postać:
 
 \begin{equation}
 x = \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} = \begin{bmatrix} x \\ \dot{x} \\ \theta \end{bmatrix}
@@ -108,13 +108,13 @@ Z definicji prędkości:
 
 \subsubsection{Pochodna prędkości ($\dot{x}_2$)}
 
-To jest przyspieszenie. Bierzemy je z równania \eqref{eq:ball_dynamics_with_mech}, które uwzględnia przekładnię mechaniczną:
+Jest to przyspieszenie. Pobiera się je z równania \eqref{eq:ball_dynamics_with_mech}, które uwzględnia przekładnię mechaniczną:
 
 \begin{equation}
 \ddot{x} = k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \cdot \theta_{\mathrm{serwo}}
 \end{equation}
 
-Ponieważ $\theta_{\mathrm{serwo}} = x_3$ (zmienna stanu), podstawiając:
+Skoro $\theta_{\mathrm{serwo}} = x_3$ (zmienna stanu), to po podstawieniu:
 
 \begin{equation}
 \dot{x}_2 = k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \cdot x_3
@@ -122,7 +122,7 @@ Ponieważ $\theta_{\mathrm{serwo}} = x_3$ (zmienna stanu), podstawiając:
 
 \subsubsection{Pochodna kąta ($\dot{x}_3$)}
 
-To jest prędkość kątowa serwa. Bierzemy ją z równania \eqref{eq:servo_dynamics}:
+Jest to prędkość kątowa serwa. Pobiera się ją z równania \eqref{eq:servo_dynamics}:
 
 \begin{equation}
 \dot{x}_3 = \frac{1}{T_{\mathrm{serwo}}} u - \frac{1}{T_{\mathrm{serwo}}} x_3
@@ -143,18 +143,18 @@ Układ równań liniowych:
 Zapis macierzowy $\dot{x} = Ax + B u$:
 
 \begin{equation}
-\begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix} = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & k_{\mathrm{mech}} \cdot c_{\mathrm{ball}} \\ 0 & 0 & -\frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} + \begin{bmatrix} 0 \\ 0 \\ \frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} u
+\begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix} = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & c_{\mathrm{ball}} \\ 0 & 0 & -\frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} + \begin{bmatrix} 0 \\ 0 \\ \frac{1}{T_{\mathrm{serwo}}} \end{bmatrix} u
 \end{equation}
 
-Oraz równanie wyjścia (mierzymy pozycję $x$):
+Oraz równanie wyjścia (mierzona jest pozycja $x$):
 
 \begin{equation}
 y = \begin{bmatrix} 1 & 0 & 0 \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix}
 \end{equation}
 
-Podstawiając wartości liczbowe stałych ($k_{\mathrm{mech}} = 0{,}2$, $c_{\mathrm{ball}} \approx 5{,}886$, $T_{\mathrm{serwo}} = 0{,}095$):
+Podstawiając wartości liczbowe stałych ( $c_{\mathrm{ball}} \approx 5{,}886$, $T_{\mathrm{serwo}} = 0{,}095$):
 
 \begin{equation}
-\begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix} = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & 1,177 \\ 0 & 0 & -10,526 \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} + \begin{bmatrix} 0 \\ 0 \\ 10,526 \end{bmatrix} u
+\begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix} = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & 5{,}886 \\ 0 & 0 & -10,526 \end{bmatrix} \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix} + \begin{bmatrix} 0 \\ 0 \\ 10,526 \end{bmatrix} u
 \end{equation}
 

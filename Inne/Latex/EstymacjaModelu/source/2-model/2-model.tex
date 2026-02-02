@@ -40,7 +40,7 @@ Jeśli serwo potrzebuje $0{,}185\,\mathrm{s}$ na pokonanie $60^{\circ}$, to jego
 prędkość maksymalna wynosi ok. $324^{\circ}/\mathrm{s}$.
 
 W klasycznym modelu $G(s)=\frac{1}{Ts+1}$, czas odpowiedzi (10\%--90\%) wynosi 
-ok. $2{,}2T$. Jeśli założymy, że dla małych skoków dynamika jest zbliżona do czasu 
+ok. $2{,}2T$. Jeśli przyjąć, że dla małych skoków dynamika jest zbliżona do czasu 
 przemieszczenia podanego w specyfikacji. Dla
 $6\,\mathrm{V}$($0{,}11\,\mathrm{s}/60^{\circ}$) $T$ mogłoby wynosić ok
 $\mathrm{V}$$0{,}05$--$0{,}07\,\mathrm{s}$. Więc dla $5\,\mathrm{V}$
@@ -55,7 +55,7 @@ Ostatecznie dynamika serwa bedzie opisana jako:
 
 \subsection{Dynamika piłeczki na belce}
 
-Rozpatrując dynamikę piłeczki na belce, wyprowadzamy równanie wiążące kąt belki 
+Rozpatrując dynamikę piłeczki na belce, wyprowadza się równanie wiążące kąt belki 
 ($\theta$) z przyspieszeniem liniowym piłeczki ($\ddot{x}$). 
 
 \subsubsection{II Zasada Dynamiki $F=ma$}
@@ -66,7 +66,7 @@ Rozpatrując dynamikę piłeczki na belce, wyprowadzamy równanie wiążące ką
   \caption{Rozkład sił działajacych na kule na równi pochyłej}
 \end{figure}
 
-Patrzmy na siły działające wzdłuż belki:
+Obserwując siły działające wzdłuż belki:
 \begin{itemize}
   \item Grawitacja ($F_g$): Jej składowa równoległa do belki wynosi $m \cdot g \cdot \sin(\theta)$.
   \item Tarcie ($T$): Działa w górę belki i zmusza piłeczkę do obrotu.
@@ -96,29 +96,29 @@ przyspieszenia kątowego:
 
 \subsubsection{Eliminacja Tarcia i Przyspieszenia Kątowego}
 
-Z warunku toczenia bez poślizgu podstawiamy $\ddot{\alpha}$ do równania momentu:
+Z warunku toczenia bez poślizgu, podstawiając $\ddot{\alpha}$ do równania momentu:
 \begin{equation}
 T \cdot R = J \cdot \frac{\ddot{x}}{R} \quad \Rightarrow \quad T = \frac{J \cdot \ddot{x}}{R^2}
 \end{equation}
 
-Teraz wstawiamy to wyrażenie na $T$ do równania ruchu postępowego:
+Wstawiając to wyrażenie na $T$ do równania ruchu postępowego:
 \begin{equation}
 m \cdot \ddot{x} = m \cdot g \cdot \sin(\theta) - \frac{J \cdot \ddot{x}}{R^2}
 \end{equation}
 
 \subsubsection{Rozwiązanie dla Przyspieszenia Liniowego}
 
-Przenosimy człon z $\ddot{x}$ na lewą stronę:
+Przenosząc człon z $\ddot{x}$ na lewą stronę:
 \begin{equation}
 m \cdot \ddot{x} + \frac{J \cdot \ddot{x}}{R^2} = m \cdot g \cdot \sin(\theta)
 \end{equation}
 
-Wyciągamy $\ddot{x}$ przed nawias:
+Wyciągając $\ddot{x}$ przed nawias:
 \begin{equation}
 \ddot{x} \left( m + \frac{J}{R^2} \right) = m \cdot g \cdot \sin(\theta)
 \end{equation}
 
-Dzielimy przez nawias:
+Dzieląc przez nawias:
 \begin{equation}
 \ddot{x} = \frac{m \cdot g \cdot \sin(\theta)}{m + \frac{J}{R^2}}
 \end{equation}
@@ -128,7 +128,7 @@ Dzieląc licznik i mianownik przez masę $m$:
 \ddot{x} = \frac{g \cdot \sin(\theta)}{1 + \frac{J}{m R^2}}
 \end{equation}
 
-Dla małych kątów $\sin(\theta) \approx \theta$, ostatecznie otrzymujemy:
+Dla małych kątów $\sin(\theta) \approx \theta$, ostatecznie otrzymuje się:
 \begin{equation}
 \ddot{x} = \frac{g}{1 + \frac{J}{m R^2}} \cdot \theta
 \end{equation}
@@ -171,7 +171,7 @@ Równanie dynamiki piłeczki w dziedzinie czasu jest następujące:
 \ddot{x}=c_{\mathrm{ball}} \cdot \theta
 \end{equation}
 
-Stosujemy transformatę Laplace'a. Dla warunków początkowych ($x(0) = 0$, $\dot{x}(0) = 0$, $\theta(0) = 0$):
+Stosując transformatę Laplace'a. Dla warunków początkowych ($x(0) = 0$, $\dot{x}(0) = 0$, $\theta(0) = 0$):
 \begin{equation}
 \mathcal{L}\{\ddot{x}(t)\} = s^2 \cdot X(s)
 \end{equation}
@@ -193,7 +193,7 @@ G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{beam}}(s)}=\frac{c_{\mathrm{b
 
 \subsection{Transmitancja całego układu}
 
-Posiadając kompletny zestaw opisu dynamik elementów układu, możemy teraz połączyć 
+Posiadając kompletny zestaw opisu dynamik elementów układu, można teraz połączyć 
 transmitancję serwa z transmitancją piłeczki na belce, uwzględniając mechaniczne 
 połączenie między nimi.
 
@@ -245,7 +245,7 @@ Transmitancja piłeczki wynosi:
 G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{belka}}(s)}
 \end{equation}
 
- Musimy podstawić 
+ Należy podstawić 
 relację $\Theta_{\mathrm{belka}}(s) = k_{\mathrm{mech}} \cdot \Theta_{\mathrm{serwo}}(s)$:
 
 \begin{equation}
@@ -257,7 +257,7 @@ Stąd wynika:
 X(s) = k_{\mathrm{mech}h} \cdot G_{\mathrm{ball}}(s) \cdot \Theta_{\mathrm{serwo}}(s)
 \end{equation}
 
-Teraz, znając że $\Theta_{\mathrm{serwo}}(s) = G_{\mathrm{serwo}}(s) \cdot U(s)$, mamy:
+Teraz, znając że $\Theta_{\mathrm{serwo}}(s) = G_{\mathrm{serwo}}(s) \cdot U(s)$, otrzymuje się:
 
 \begin{equation}
 X(s) = k_{\mathrm{mech}} \cdot G_{\mathrm{ball}}(s) \cdot G_{\mathrm{serwo}}(s) \cdot U(s)
