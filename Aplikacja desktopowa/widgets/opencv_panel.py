@@ -64,6 +64,14 @@ class OpenCVPanel(QWidget):
         self._gamma_lut = None  # Cached gamma LUT table
         self._update_gamma_lut()
 
+        # CLAHE (Contrast Limited Adaptive Histogram Equalization) parameters
+        # Better than global contrast for handling shadows and uneven lighting
+        self.aruco_clahe_enabled = True  # Enable CLAHE preprocessing
+        self.aruco_clahe_clip_limit = 2.0  # Contrast limiting threshold (1.0-10.0)
+        self.aruco_clahe_tile_size = 8  # Tile grid size (4-16)
+        self._clahe = cv2.createCLAHE(clipLimit=self.aruco_clahe_clip_limit, 
+                                       tileGridSize=(self.aruco_clahe_tile_size, self.aruco_clahe_tile_size))
+
         # Calibration for ball position (to correct perspective)
         self.calib_min = 0.0  # raw value when ball is at 0mm
         self.calib_max = 1.0  # raw value when ball is at 250mm
@@ -462,6 +470,34 @@ class OpenCVPanel(QWidget):
 
         sliders_layout.addWidget(display_group)
 
+        # CLAHE group (advanced local contrast)
+        clahe_group = QGroupBox("CLAHE (Adaptacyjny kontrast lokalny)")
+        clahe_layout = QGridLayout(clahe_group)
+
+        self.chk_clahe = QCheckBox("Włącz CLAHE")
+        self.chk_clahe.setChecked(self.aruco_clahe_enabled)
+        self.chk_clahe.stateChanged.connect(self._on_clahe_enabled_changed)
+        self.chk_clahe.setToolTip("CLAHE wyrównuje histogram lokalnie - wyciąga detale z cieni bez przepalania jasnych miejsc")
+        clahe_layout.addWidget(self.chk_clahe, 0, 0, 1, 3)
+
+        clahe_layout.addWidget(QLabel("Clip Limit:"), 1, 0)
+        self.slider_clahe_clip = self._create_slider(10, 100, int(self.aruco_clahe_clip_limit * 10))
+        self.slider_clahe_clip.valueChanged.connect(self._on_clahe_clip_changed)
+        self.slider_clahe_clip.setToolTip("Limit kontrastu (1.0-10.0). Wyższe = więcej kontrastu, ale może generować szum")
+        clahe_layout.addWidget(self.slider_clahe_clip, 1, 1)
+        self.lbl_clahe_clip = QLabel(f"{self.aruco_clahe_clip_limit:.1f}")
+        clahe_layout.addWidget(self.lbl_clahe_clip, 1, 2)
+
+        clahe_layout.addWidget(QLabel("Tile Size:"), 2, 0)
+        self.slider_clahe_tile = self._create_slider(2, 16, self.aruco_clahe_tile_size)
+        self.slider_clahe_tile.valueChanged.connect(self._on_clahe_tile_changed)
+        self.slider_clahe_tile.setToolTip("Rozmiar siatki (2-16). Mniejsze = więcej lokalnych detali, większe = bardziej globalne")
+        clahe_layout.addWidget(self.slider_clahe_tile, 2, 1)
+        self.lbl_clahe_tile = QLabel(f"{self.aruco_clahe_tile_size}x{self.aruco_clahe_tile_size}")
+        clahe_layout.addWidget(self.lbl_clahe_tile, 2, 2)
+
+        sliders_layout.addWidget(clahe_group)
+
         # Save/Load buttons for ArUco detection
         btn_layout = QHBoxLayout()
         self.btn_save_aruco = QPushButton("Zapisz parametry")
@@ -676,6 +712,10 @@ class OpenCVPanel(QWidget):
                 "upscale_factor": self.aruco_upscale_factor,
                 "sharpen_enabled": self.aruco_sharpen_enabled,
                 "apriltag_refine": self.aruco_apriltag_refine,
+                # CLAHE params
+                "clahe_enabled": self.aruco_clahe_enabled,
+                "clahe_clip_limit": self.aruco_clahe_clip_limit,
+                "clahe_tile_size": self.aruco_clahe_tile_size,
             },
             "calibration": {"min": self.calib_min, "max": self.calib_max, "angle_offset": self.angle_offset, "angle_method": self.angle_method},
         }
@@ -739,6 +779,13 @@ class OpenCVPanel(QWidget):
                 self.chk_sharpen.setChecked(aruco["sharpen_enabled"])
             if "apriltag_refine" in aruco:
                 self.chk_apriltag.setChecked(aruco["apriltag_refine"])
+            # CLAHE params
+            if "clahe_enabled" in aruco:
+                self.chk_clahe.setChecked(aruco["clahe_enabled"])
+            if "clahe_clip_limit" in aruco:
+                self.slider_clahe_clip.setValue(int(aruco["clahe_clip_limit"] * 10))
+            if "clahe_tile_size" in aruco:
+                self.slider_clahe_tile.setValue(aruco["clahe_tile_size"])
 
             # Load calibration params
             calib = params.get("calibration", {})
@@ -1009,6 +1056,25 @@ class OpenCVPanel(QWidget):
         self.lbl_aruco_gamma.setText(f"{self.aruco_gamma:.2f}")
         self._update_gamma_lut()
 
+    def _on_clahe_enabled_changed(self, state):
+        self.aruco_clahe_enabled = state == 2
+        self._log_global(f"CLAHE: {'ON' if self.aruco_clahe_enabled else 'OFF'}", "aruco")
+
+    def _on_clahe_clip_changed(self, val):
+        self.aruco_clahe_clip_limit = val / 10.0
+        self.lbl_clahe_clip.setText(f"{self.aruco_clahe_clip_limit:.1f}")
+        self._update_clahe()
+
+    def _on_clahe_tile_changed(self, val):
+        self.aruco_clahe_tile_size = val
+        self.lbl_clahe_tile.setText(f"{self.aruco_clahe_tile_size}x{self.aruco_clahe_tile_size}")
+        self._update_clahe()
+
+    def _update_clahe(self):
+        """Update CLAHE object with current parameters"""
+        self._clahe = cv2.createCLAHE(clipLimit=self.aruco_clahe_clip_limit, 
+                                       tileGridSize=(self.aruco_clahe_tile_size, self.aruco_clahe_tile_size))
+
     def _update_gamma_lut(self):
         """Update cached gamma LUT table"""
         if self.aruco_gamma != 1.0:
@@ -1254,6 +1320,11 @@ class OpenCVPanel(QWidget):
             roi_gray = gray_raw[ry:ry+rh, rx:rx+rw].copy()
             
             # === Stosuj ulepszenia TYLKO do tego małego ROI ===
+            # CLAHE - adaptacyjny lokalny kontrast (lepszy dla cieni)
+            if self.aruco_clahe_enabled:
+                roi_gray = self._clahe.apply(roi_gray)
+            
+            # Globalna jasność/kontrast (dodatkowe dostrojenie)
             if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
                 roi_gray = cv2.convertScaleAbs(roi_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
             
@@ -1292,6 +1363,10 @@ class OpenCVPanel(QWidget):
                 offset_x, offset_y = 0, 0
             
             # Stosuj ulepszenia do fallback ROI
+            # CLAHE - adaptacyjny lokalny kontrast (lepszy dla cieni)
+            if self.aruco_clahe_enabled:
+                search_gray = self._clahe.apply(search_gray)
+            
             if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
                 search_gray = cv2.convertScaleAbs(search_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
             
@@ -1522,6 +1597,10 @@ class OpenCVPanel(QWidget):
                 if rw >= 20 and rh >= 20:
                     # Wytnij i przetwórz ROI (tak samo jak w detekcji)
                     roi_gray = gray_raw[ry:ry+rh, rx:rx+rw].copy()
+                    
+                    # CLAHE - adaptacyjny lokalny kontrast
+                    if self.aruco_clahe_enabled:
+                        roi_gray = self._clahe.apply(roi_gray)
                     
                     if self.aruco_contrast != 1.0 or self.aruco_brightness != 0:
                         roi_gray = cv2.convertScaleAbs(roi_gray, alpha=self.aruco_contrast, beta=self.aruco_brightness)
