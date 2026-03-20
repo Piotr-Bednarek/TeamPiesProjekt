@@ -4,4 +4,6 @@ STM/.settings
 *.pyc
 
 .venv
-.vscode
+.vscode.DS_Store
+*.asv
+slprj/
