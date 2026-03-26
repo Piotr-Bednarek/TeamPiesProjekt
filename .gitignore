@@ -1,5 +1,5 @@
-STM/Debug
-STM/.settings
+firmware/Debug
+firmware/.settings
 
 *.pyc
 
@@ -7,3 +7,5 @@ STM/.settings
 .vscode.DS_Store
 *.asv
 slprj/
+
+.claude
