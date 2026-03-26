@@ -1,0 +1,171 @@
+% Preambuła: definicja klasy dokumentu i lista potrzebnych pakietów ///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+\documentclass[12pt, a4paper]{report} % rozmiar czcionki, klasa dokumentu
+\usepackage[left=2.5cm, right=2.5cm, top=3.5cm, bottom=3.5cm]{geometry} % ustawienia marginesów
+\usepackage{amsmath} % przydatne przy pisaniu wzorów i symboli matematycznych
+\usepackage{amssymb} % j.w.
+\usepackage{amsthm} % j.w.
+\usepackage{polski} % język polski i skład tekstu zgodnie z polskimi zasadami typografii
+\usepackage[T1]{fontenc} % polskie fonty w formacie wektorowym
+\usepackage[utf8]{inputenc} % j.w.
+\usepackage{enumerate} % konfiguracja wyglądu wypunktowań (i) (ii) A) B) 1) 2) etc.
+\usepackage[pdftex]{graphicx} % umieszczanie grafiki w pracy (w tym również w formacie wektorowym PDF)
+\usepackage{indentfirst} % wcięcie pierwszego akapitu
+\usepackage{booktabs} % do rysowania eleganckich tabel
+\usepackage{color} % kolor w LaTeXu
+\usepackage{pgfplots} % rysowanie wykresów i grafiki wektorowej
+\pgfplotsset{compat=1.18}
+\usepackage{titlesec} % zmiana wyglądu tytułów rozdziałów (czcionka, odległości między wierszami tytułów etc.)
+\usepackage[position=t,justification=centering, singlelinecheck=off]{subfig} % pozwala umieszczać rysunki obok siebie; etykiety (a) (b) etc. nad rysunkiem i wycentrowane
+\usepackage{fancyhdr} % formatowanie nagłówka, stopki i żywej paginy
+\usepackage{microtype} % optymalne (wizualnie) odstępy między znakami - poprawia czytelność tekstu
+\usepackage[pdftex]{hyperref} % tworzenie połączeń hipertekstowych (odnośników)
+\usepackage{lmodern}
+
+
+% Konfiguracja nagłówka, stopki (w tym wyglądu i sposobu numeracji stron) i wyglądu tytułów głównych rozdziałów ///////////////////////////////////////////////
+
+\pagestyle{fancy}
+\cfoot{\thepage}
+\fancyhead{} % czyści wszystkie pola w nagłówku
+\fancyhead[RO,LE]{\textit {\textsl{Tytuł pracy} \ldots}} % tekst w nagłówku
+\fancyfoot{} % czyści wszystkie pola w stopce
+\fancyfoot[C]{\thepage} % numery stron w stopce; wycentrowane
+
+\titleformat{\chapter}[display]
+  {\normalfont\Large\raggedleft}
+  {\MakeUppercase{\chaptertitlename}
+    \rlap{ \resizebox{!}{1.5cm}{\thechapter} \rule{5cm}{1.5cm}}}
+  {10pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{30pt}{50pt} % odstępy w tytule głównym
+
+
+
+% Początek dokumenty ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+\begin{document}
+
+  % Strona tytułowa
+\begin{titlepage}
+
+\vspace*{-2cm} % odstęp pionowy
+
+\begin{center} % wypośrodkuj
+\Large \textbf{POLITECHNIKA POZNAŃSKA}\\[1mm]
+\Large {WYDZIAŁ ELEKTRYCZNY}\\[1mm]
+\begin{large}
+Instytut Elektroenergetyki\\[1mm]
+Zakład Wysokich Napięć i Materiałów Elektrotechnicznych\\[1cm]
+\end{large}
+\end{center}
+
+\begin{center}
+\includegraphics[height=3cm,keepaspectratio]{logo.pdf}
+\end{center}
+
+\vspace{1cm}
+
+\begin{center}
+\Large \textbf {Imię Nazwisko}
+\end{center}
+
+\vspace{1cm}
+
+\begin{center}
+\Large \textbf{\textit{TYTUŁ PRACY DYPLOMOWEJ}}
+\end{center}
+
+\vspace{3cm}
+\hfill
+\textbf {Promotor}: dr inż. Imię Nazwisko
+
+\vspace{2cm}
+
+ \hspace*{-1cm}
+\begin{minipage}{7cm}
+\centering
+Pracę przyjmuję i akceptuję\\
+
+\vspace{0.5cm}
+
+................................................\\
+
+\textit{\footnotesize data i podpis opiekuna pracy}
+\end{minipage}
+
+\vspace{2.5cm}
+
+\begin{center}
+Poznań, \the\year
+\end{center}
+
+
+  % Pusta strona  (w tym miejscu karta tematu z Dziekanatu) \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+\newpage\null\thispagestyle{empty}\newpage
+
+
+ % Streszczenie \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+    \newpage\thispagestyle{empty}
+    \vspace*{2\baselineskip}
+    \begin{center}
+	{\large\bfseries Streszczenie}\par\bigskip
+    \end{center}
+
+    {\itshape
+    % Treść streszczenia
+    }
+    \vspace*{1\baselineskip}
+
+    \noindent{\bf Słowa kluczowe}: {\itshape słowo1, słowo2.}
+    \par
+    \vspace{4\baselineskip}
+
+  % Abstract \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+    \begin{center}
+	{\large\bfseries Abstract}\par\bigskip
+    \end{center}
+    \noindent{\bf Title}: {\itshape Title of the thesis.}\par
+    \vspace*{1\baselineskip}
+    {\itshape
+    % Abstract content
+    }
+    \vspace*{1\baselineskip}
+
+    \noindent{\bf Key words}: {\itshape keyword1, keyword2.}
+
+\end{titlepage}
+
+  % Spis treści ]\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+\tableofcontents % wstawia spis treści
+
+ % Główna część pracy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+% WSTĘP _____________________________________________________________________________________________________________________
+\chapter*{Wstęp} % rozdział nienumerowany (dlatego *)
+\addcontentsline{toc}{chapter}{Wstęp} % uwzględnia nienumerowany rozdział <Wstęp> w <Spisie treści>
+
+
+% ROZDZIAŁ 1 _________________________________________________________________________________________________________________
+\input{1-wprowadzenie/1-wprowadzenie}
+
+% ROZDZIAŁ 2 _________________________________________________________________________________________________________________
+\input{2-budowa-stanowiska-i-oprogramowanie/2-budowa-stanowiska-i-oprogramowanie}
+
+% ROZDZIAŁ 3 _________________________________________________________________________________________________________________
+\input{3-model-matematyczny-i-projekt-regulacji/3-model-matematyczny-i-projekt-regulacji}
+
+% ROZDZIAŁ 4 _________________________________________________________________________________________________________________
+\input{4-wyniki-eksperymentalne/4-wyniki-eksperymentalne}
+
+% ROZDZIAŁ 5 _________________________________________________________________________________________________________________
+\input{5-podsumowanie-i-wnioski/5-podsumowanie-i-wnioski}
+
+
+% BIBLIOGRAFIA ___________________________________________________________________________________________________________
+\bibliographystyle{unsrt} % kolejność cytowania w tekście
+\bibliography{bibliografia}
+
+\listoffigures
+\appendix
+
+\end{document}
