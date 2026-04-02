@@ -2,8 +2,83 @@
 
 \chapter{Wprowadzenie}
 
+Układ kulka na belce (\textit{ball and beam}) jest klasycznym laboratoryjnym obiektem sterowania,
+powszechnie stosowanym w dydaktyce automatyki ze względu na prostą budowę mechaniczną
+i zarazem nieliniową, niestabilną dynamikę \cite{bolivar2014modelling}.
+Zadanie sterowania polega na utrzymaniu toczącego się swobodnie po belce metalowego walca
+w~zadanej pozycji poprzez regulację kąta wychylenia belki napędzanej serwomechanizmem.
+Pomimo pozornej prostoty obiekt ten wymaga zastosowania metod nowoczesnej teorii sterowania,
+co czyni go idealną platformą do weryfikacji algorytmów regulacji zarówno klasycznych, jak i optymalnych.
+
 \section{Cel i zakres pracy}
+
+Celem niniejszej pracy jest zaprojektowanie i zbudowanie autonomicznego stanowiska
+sterowania kulką na belce opartego na mikrokontrolerze STM32F767ZI \cite{stm32f767zi}
+oraz zaimplementowanie i porównanie dwóch algorytmów regulacji:
+\begin{itemize}
+  \item regulatora \textbf{PID} z filtrem pochodnej, członem anti-windup i strojeniem
+        w~oparciu o odpowiedź skokową i sygnał APRBS,
+  \item regulatora \textbf{LQR} (\textit{Linear Quadratic Regulator}) w~przestrzeni stanów
+        z~wektorem stanu obejmującym pozycję kulki, jej prędkość oraz kąt belki.
+\end{itemize}
+
+Zakres pracy obejmuje:
+\begin{enumerate}[(i)]
+  \item identyfikację modelu matematycznego obiektu metodami doświadczalnymi,
+  \item projektowanie i dobór nastaw regulatorów PID oraz LQR,
+  \item budowę stanowiska laboratoryjnego z czujnikiem ToF VL53L0X \cite{vl53l0x}
+        i serwomechanizmem MG90S,
+  \item implementację algorytmów w środowisku FreeRTOS na platformie STM32,
+  \item opracowanie aplikacji nadzorczej w języku Python~(PySide6) z podglądem
+        kamery i detekcją pozycji kulki metodami wizji komputerowej \cite{kadam2024object},
+  \item eksperymentalną weryfikację i porównanie obu strategii sterowania.
+\end{enumerate}
 
 \section{Przegląd literatury}
 
+Układ kulka na belce jest od dziesięcioleci obiektem intensywnych badań w dziedzinie
+automatyki i robotyki.
+Pierwszym krokiem projektowania regulatora jest zawsze wyprowadzenie modelu matematycznego.
+Bolívar-Vincenty i Beauchamp-Báez \cite{bolivar2014modelling} wykazali, że równania ruchu
+otrzymane metodą Newtona i metodą Lagrange'a są tożsame, o ile poprawnie uwzględni się
+człony wynikające z obrotu układu odniesienia — błąd często popełniany w literaturze.
+Autorzy wyprowadzają nieliniowe równania stanu, a następnie linearyzują je w otoczeniu
+punktu równowagi, uzyskując transmitancję i liniowy model przestrzeni stanów, stanowiący
+punkt wyjścia do syntezy regulatora.
+
+Wśród klasycznych podejść do sterowania układem dominuje regulator PID.
+Taifour Ali i~in. \cite{taifour2017design} przedstawili implementację dwupętlowego
+regulatora PID na mikrokontrolerze Arduino z ultradźwiękowym czujnikiem odległości
+i serwomechanizmem DC.
+Autorzy potwierdzili skuteczność ręcznego doboru nastaw metodą prób i błędów,
+uzyskując stabilizację z minimalnymi oscylacjami przy $K_p{=}4$, $K_i{=}1$, $K_d{=}2$.
+W pracy wykazano, że dołączenie członu całkującego istotnie redukuje uchyb ustalony,
+a pochodna skraca czas regulacji i tłumi przeregulowania.
+
+Projektowanie optymalnych regulatorów stanu wymaga solidnych podstaw teoretycznych.
+Ogata \cite{ogata2010modern} oraz Franklin i~in. \cite{franklin2014feedback} dostarczają
+kompletnego opisu teorii przestrzeni stanów, analizy sterowalności i obserwowalności
+oraz syntezy LQR minimalizującego wskaźnik jakości kwadratowej.
+W niniejszej pracy macierze wag $\mathbf{Q}$ i $R$ dobrano metodą iteracyjną
+z pomocą środowiska MATLAB/Simulink, a uzyskane wzmocnienia $\mathbf{K}$ przeniesiono
+bezpośrednio do firmware'u mikrokontrolera.
+
+Dodatkową funkcją stanowiska jest wizualna weryfikacja pozycji kulki za pomocą kamery.
+Przegląd metod śledzenia obiektów w wizji komputerowej przeprowadzony przez
+Kadama i~in. \cite{kadam2024object} wskazuje, że klasyczne podejście oparte na transformacji
+przestrzeni barw HSV i detekcji okręgów metodą Hougha pozostaje skuteczne dla
+obiektów o~regularnym kształcie i~kontrolowanym oświetleniu — warunki spełnione
+na stanowisku laboratoryjnym.
+Głębsze metody uczenia maszynowego byłyby uzasadnione w środowiskach o zmiennym tle
+lub przy wielu obiektach; dla niniejszego zastosowania przyjęto rozwiązanie klasyczne.
+
 \section{Struktura pracy}
+
+Praca podzielona jest na pięć rozdziałów.
+Rozdział~\ref{ch:budowa} opisuje budowę mechaniczną i elektryczną stanowiska
+oraz architekturę oprogramowania — firmware FreeRTOS i aplikację nadzorczą Python.
+Rozdział~\ref{ch:model} zawiera wyprowadzenie modelu matematycznego obiektu
+metodą Lagrange'a, linearyzację w punkcie pracy oraz projekt regulatorów PID i~LQR.
+Rozdział~\ref{ch:wyniki} prezentuje wyniki eksperymentów identyfikacyjnych i regulacyjnych,
+w tym porównanie charakterystyk skokowych obu strategii sterowania.
+Rozdział~\ref{ch:wnioski} podsumowuje pracę i wskazuje kierunki dalszych badań.
