@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lh \"C:\\\\Users\\\\janek\\\\Documents\\\\STM_PROJEKT_ZALICZENIOWY\\\\3-docs\"/*.pdf \"C:\\\\Users\\\\janek\\\\Documents\\\\STM_PROJEKT_ZALICZENIOWY\\\\3-docs\"/*/*.pdf \"C:\\\\Users\\\\janek\\\\Documents\\\\STM_PROJEKT_ZALICZENIOWY\\\\3-docs\"/*/*/*.pdf)"
+    ]
+  }
+}

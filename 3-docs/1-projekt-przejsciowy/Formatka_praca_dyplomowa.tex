@@ -21,14 +21,70 @@
 \usepackage{microtype} % optymalne (wizualnie) odstępy między znakami - poprawia czytelność tekstu
 \usepackage[pdftex]{hyperref} % tworzenie połączeń hipertekstowych (odnośników)
 \usepackage{lmodern}
+\usepackage{float}    % umożliwia [H] dla figur
+\usepackage{caption}  % formatowanie podpisów
+\usepackage{listings} % listingi kodu źródłowego
+\usepackage{xcolor}   % kolory dla listingów
 
+% Kolory i style listingów kodu
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{codeblue}{rgb}{0,0,0.7}
+
+\lstdefinestyle{cstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{codeblue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showstringspaces=false,
+    tabsize=2,
+    language=C,
+    frame=single,
+    rulecolor=\color{codegray},
+    literate={ą}{{\k{a}}}1 {ć}{{\'c}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1
+             {ń}{{\'n}}1 {ó}{{\'o}}1 {ś}{{\'s}}1 {ź}{{\'z}}1 {ż}{{\.z}}1
+             {Ą}{{\k{A}}}1 {Ć}{{\'C}}1 {Ę}{{\k{E}}}1 {Ł}{{\L{}}}1
+             {Ń}{{\'N}}1 {Ó}{{\'O}}1 {Ś}{{\'S}}1 {Ź}{{\'Z}}1 {Ż}{{\.Z}}1
+}
+
+\lstdefinestyle{pythonstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{codeblue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showstringspaces=false,
+    tabsize=2,
+    language=Python,
+    frame=single,
+    rulecolor=\color{codegray},
+    literate={ą}{{\k{a}}}1 {ć}{{\'c}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1
+             {ń}{{\'n}}1 {ó}{{\'o}}1 {ś}{{\'s}}1 {ź}{{\'z}}1 {ż}{{\.z}}1
+             {Ą}{{\k{A}}}1 {Ć}{{\'C}}1 {Ę}{{\k{E}}}1 {Ł}{{\L{}}}1
+             {Ń}{{\'N}}1 {Ó}{{\'O}}1 {Ś}{{\'S}}1 {Ź}{{\'Z}}1 {Ż}{{\.Z}}1
+}
 
 % Konfiguracja nagłówka, stopki (w tym wyglądu i sposobu numeracji stron) i wyglądu tytułów głównych rozdziałów ///////////////////////////////////////////////
 
 \pagestyle{fancy}
 \cfoot{\thepage}
 \fancyhead{} % czyści wszystkie pola w nagłówku
-\fancyhead[RO,LE]{\textit {\textsl{Projekt i budowa stanowiska badawczego równoważni z regulatorem} \ldots}} % tekst w nagłówku
+\fancyhead[RO,LE]{\textit {\textsl{Projekt i budowa układu regulacji dla układu Ball on Beam} \ldots}} % tekst w nagłówku
 \fancyfoot{} % czyści wszystkie pola w stopce
 \fancyfoot[C]{\thepage} % numery stron w stopce; wycentrowane
 
@@ -71,7 +127,7 @@ Zakład Automatyki i Optymalizacji\\[1cm]
 \vspace{1cm}
 
 \begin{center}
-\Large \textbf{\textit{PROJEKT I BUDOWA STANOWISKA RÓWNOWAŻNI Z REGULATOREM}}
+\Large \textbf{\textit{PROJEKT I BUDOWA UKŁADU REGULACJI DLA UKŁADU BALL ON BEAM}}
 \end{center}
 
 \vspace{3cm}
@@ -111,11 +167,24 @@ Poznań, \the\year
     \end{center}
 
     {\itshape
-    % Treść streszczenia
+    Praca przedstawia projekt i~budowę autonomicznego stanowiska do sterowania
+    pozycją kulki na belce (\textit{ball and beam}) z~wykorzystaniem mikrokontrolera
+    STM32F767ZI.
+    Opisano budowę mechaniczną stanowiska, zastosowane peryferia (serwomechanek
+    MG946R, czujnik odległości VL53L0X, rząd diod LED, potencjometr) oraz
+    architekturę oprogramowania opartą na systemie FreeRTOS.
+    Wyprowadzono model matematyczny układu i~zaprojektowano dwa regulatory:
+    klasyczny PID z~anti-windup oraz optymalny LQR w~przestrzeni stanów.
+    Aplikacja nadzorcza napisana w~Pythonie (PySide6) umożliwia wizualizację
+    sygnałów w~czasie rzeczywistym, zapis danych do pliku CSV oraz zdalne
+    strojenie regulatora.
+    Przeprowadzono weryfikację eksperymentalną i~potwierdzono spełnienie
+    wszystkich wymagań projektowych.
     }
     \vspace*{1\baselineskip}
 
-    \noindent{\bf Słowa kluczowe}: {\itshape słowo1, słowo2.}
+    \noindent{\bf Słowa kluczowe}: {\itshape regulacja automatyczna, kulka na belce,
+    STM32, PID, LQR, FreeRTOS, VL53L0X.}
     \par
     \vspace{4\baselineskip}
 
@@ -123,14 +192,24 @@ Poznań, \the\year
     \begin{center}
 	{\large\bfseries Abstract}\par\bigskip
     \end{center}
-    \noindent{\bf Title}: {\itshape Title of the thesis.}\par
+    \noindent{\bf Title}: {\itshape Design and Construction of a Control System for the Ball and Beam System.}\par
     \vspace*{1\baselineskip}
     {\itshape
-    % Abstract content
+    This thesis presents the design and construction of an autonomous ball-and-beam
+    control system based on the STM32F767ZI microcontroller.
+    The mechanical setup, hardware peripherals (MG946R servo, VL53L0X time-of-flight
+    sensor, LED bar, potentiometer), and FreeRTOS-based software architecture are
+    described.
+    A mathematical model of the plant is derived and two controllers are designed:
+    a classical PID with anti-windup and an optimal LQR state-feedback controller.
+    A supervisory desktop application (Python/PySide6) provides real-time signal
+    visualisation, CSV data logging, and remote parameter tuning.
+    Experimental verification confirms that all project requirements are satisfied.
     }
     \vspace*{1\baselineskip}
 
-    \noindent{\bf Key words}: {\itshape keyword1, keyword2.}
+    \noindent{\bf Key words}: {\itshape automatic control, ball and beam, STM32, PID,
+    LQR, FreeRTOS, VL53L0X.}
 
 \end{titlepage}
 

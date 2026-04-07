@@ -3,10 +3,263 @@
 \chapter{Model matematyczny i projekt regulacji}
 \label{ch:model}
 
+Rozdział ten przedstawia wyprowadzenie modelu matematycznego układu kulka na belce,
+metodę identyfikacji jego parametrów oraz projekt regulatorów PID i~LQR.
+
+% -----------------------------------------------------------------------
 \section{Model matematyczny obiektu regulacji}
+% -----------------------------------------------------------------------
 
+Układ składa się z~trzech elementów połączonych szeregowo: serwomechanizmu,
+mechanicznego połączenia dźwigniowego oraz kulki toczącej się po belce.
+
+\subsection{Dynamika serwomechanizmu}
+
+Dynamikę serwomechanizmu w~pierwszym przybliżeniu opisuje człon inercyjny
+pierwszego rzędu:
+\begin{equation}
+  G_{\mathrm{serwo}}(s) = \frac{\Theta_{\mathrm{serwo}}(s)}{\Theta_{\mathrm{ref}}(S)} = \frac{1}{T_{\mathrm{serwo}}\,s+1},
+\end{equation}
+gdzie $T_{\mathrm{serwo}}$ jest stałą czasową serwa.
+
+Na podstawie danych katalogowych serwomechanizmu MG946R
+(0{,}20\,s/60° przy 4{,}8\,V; 0{,}11\,s/60° przy 6\,V)
+interpolując dla napięcia 5\,V:
+\begin{equation}
+  V_{5\mathrm{V}} \approx 0{,}20 - \frac{0{,}09}{1{,}2} \cdot 0{,}2 \approx 0{,}185\,\mathrm{s}/60^{\circ}.
+\end{equation}
+Przyjęto stałą czasową $T_{\mathrm{serwo}} = 0{,}095\,\mathrm{s}$.
+
+\subsection{Dynamika kulki na belce}
+
+\subsubsection{Równanie ruchu — II zasada dynamiki}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{3-model-matematyczny-i-projekt-regulacji/3-img/silybelka.png}
+  \caption{Rozkład sił działających na kulkę na równi pochyłej}
+  \label{fig:silybelka}
+\end{figure}
+
+Dla kulki toczącej się bez poślizgu po belce pochylonej pod kątem $\theta$
+równanie ruchu postępowego wynosi:
+\begin{equation}
+  m\ddot{x} = m\,g\sin\theta - T,
+\end{equation}
+a równanie momentu obrotowego wokół osi kulki:
+\begin{equation}
+  T \cdot R = J\,\ddot{\alpha},
+\end{equation}
+gdzie $T$ — siła tarcia statycznego, $R$ — promień kulki, $J$ — moment bezwładności,
+$\ddot\alpha$ — przyspieszenie kątowe kulki.
+
+\subsubsection{Warunek toczenia bez poślizgu}
+
+Z~warunku $\ddot x = \ddot\alpha\cdot R$ eliminuje się siłę tarcia:
+\begin{equation}
+  m\ddot{x} + \frac{J}{R^2}\ddot{x} = m\,g\sin\theta
+  \quad\Rightarrow\quad
+  \ddot{x} = \frac{g\sin\theta}{1 + J/(mR^2)}.
+\end{equation}
+
+Dla małych kątów $\sin\theta\approx\theta$, a~dla walcowej kulki
+$J = \tfrac{2}{3}mR^2$, stąd:
+\begin{equation}
+  \ddot{x} = \underbrace{\frac{g}{1 + 2/3}}_{c_{\mathrm{ball}}} \cdot\theta
+  = 0{,}6\,g\cdot\theta.
+\end{equation}
+
+Stała dynamiki kulki wynosi:
+\begin{equation}
+  c_{\mathrm{ball}} = 0{,}6 \times 9{,}81 = 5{,}886\,\mathrm{m/s^2}.
+\end{equation}
+
+\subsubsection{Transmitancja kulki na belce}
+
+Po zastosowaniu transformaty Laplace'a (zerowe warunki początkowe):
+\begin{equation}
+  G_{\mathrm{ball}}(s) = \frac{X(s)}{\Theta_{\mathrm{beam}}(s)} = \frac{c_{\mathrm{ball}}}{s^2}.
+\end{equation}
+
+\subsection{Połączenie mechaniczne i transmitancja całkowita}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{3-model-matematyczny-i-projekt-regulacji/3-img/kmech.png}
+  \caption{Schemat mechanicznego połączenia serwa z~belką (dźwignia)}
+  \label{fig:kmech}
+\end{figure}
+
+Kąty serwa i~belki powiązane są przez przekładnię mechaniczną:
+\begin{equation}
+  \theta_{\mathrm{beam}} = \frac{r_{\mathrm{serwo}}}{r_{\mathrm{belka}}} \cdot \theta_{\mathrm{serwo}}
+  = k_{\mathrm{mech}} \cdot \theta_{\mathrm{serwo}},
+\end{equation}
+gdzie $r_{\mathrm{serwo}} = 3\,\mathrm{cm}$, $r_{\mathrm{belka}} = 15\,\mathrm{cm}$,
+zatem $k_{\mathrm{mech}} = 0{,}2$.
+
+Całkowita transmitancja układu (od sygnału sterującego $U(s)$ do pozycji kulki $X(s)$):
+\begin{equation}
+  G_{\mathrm{total}}(s) = k_{\mathrm{mech}} \cdot G_{\mathrm{serwo}}(s) \cdot G_{\mathrm{ball}}(s)
+  = \frac{k_{\mathrm{mech}}\cdot c_{\mathrm{ball}}}{s^2(T_{\mathrm{serwo}}\,s+1)}.
+  \label{eq:Gtotal}
+\end{equation}
+
+Podstawiając wartości liczbowe:
+\begin{equation}
+  G_{\mathrm{total}}(s) = \frac{0{,}2\times 5{,}886}{0{,}095\,s^3 + s^2}
+  = \frac{1{,}177}{0{,}095\,s^3 + s^2}.
+\end{equation}
+
+% -----------------------------------------------------------------------
 \section{Identyfikacja parametrów modelu}
+% -----------------------------------------------------------------------
 
+\subsection{Sygnał PRBS}
+
+Do identyfikacji parametrów serwa zastosowano sygnał PRBS
+(\textit{Pseudo Random Binary Sequence}) — deterministyczną sekwencję
+dwustanową o~właściwościach szumopodobnych.
+PRBS zapewnia szerokie widmo częstotliwościowe i~ograniczoną amplitudę,
+co jest istotne ze względu na stabilność mechaniki stanowiska.
+
+Ze względu na ograniczoną możliwość doboru parametrów PRBS
+(długości sekwencji i~czasu trwania bitu) pokrywających pełną dynamikę
+obiektu, wyniki identyfikacji oparto ostatecznie na odpowiedzi skokowej
+i~danych katalogowych serwomechanizmu.
+
+\subsection{Przyjęte parametry modelu}
+
+\begin{table}[H]
+  \centering
+  \caption{Parametry numeryczne modelu}
+  \label{tab:parametry}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Parametr} & \textbf{Wartość} & \textbf{Źródło} \\
+    \midrule
+    $T_{\mathrm{serwo}}$ & $0{,}095\,\mathrm{s}$ & karta katalogowa, interpolacja \\
+    $c_{\mathrm{ball}}$  & $5{,}886\,\mathrm{m/s^2}$ & wyprowadzenie analityczne \\
+    $k_{\mathrm{mech}}$  & $0{,}20$ & pomiar geometryczny ($3\,\mathrm{cm}/15\,\mathrm{cm}$) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------
 \section{Projekt regulatora}
+% -----------------------------------------------------------------------
 
+\subsection{Opis przestrzeni stanów}
+
+Jako wektor stanu przyjęto trzy fizycznie mierzalne wielkości:
+\begin{equation}
+  \mathbf{x} = \begin{bmatrix} x \\ \dot{x} \\ \theta \end{bmatrix},
+\end{equation}
+gdzie $x$ — pozycja kulki, $\dot{x}$ — prędkość kulki, $\theta$ — kąt serwa (belki).
+
+Wyprowadzając równania różniczkowe z~bloków transmitancyjnych, otrzymuje się model
+przestrzeni stanów w~postaci $\dot{\mathbf{x}} = A\mathbf{x} + Bu$, $y = C\mathbf{x}$:
+
+\begin{equation}
+  \begin{bmatrix} \dot{x}_1 \\ \dot{x}_2 \\ \dot{x}_3 \end{bmatrix}
+  =
+  \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & c_{\mathrm{ball}} \\ 0 & 0 & -1/T_{\mathrm{serwo}} \end{bmatrix}
+  \begin{bmatrix} x_1 \\ x_2 \\ x_3 \end{bmatrix}
+  +
+  \begin{bmatrix} 0 \\ 0 \\ 1/T_{\mathrm{serwo}} \end{bmatrix} u,
+  \label{eq:statespace}
+\end{equation}
+
+\begin{equation}
+  y = \begin{bmatrix} 1 & 0 & 0 \end{bmatrix} \mathbf{x}.
+\end{equation}
+
+Podstawiając wartości liczbowe ($c_{\mathrm{ball}} = 5{,}886$, $T_{\mathrm{serwo}} = 0{,}095$):
+
+\begin{equation}
+  A = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & 5{,}886 \\ 0 & 0 & -10{,}526 \end{bmatrix},
+  \quad
+  B = \begin{bmatrix} 0 \\ 0 \\ 10{,}526 \end{bmatrix},
+  \quad
+  C = \begin{bmatrix} 1 & 0 & 0 \end{bmatrix}.
+\end{equation}
+
+\subsection{Sterowalność}
+
+Macierz sterowalności $\mathcal{C} = [B\;AB\;A^2B]$:
+
+\begin{equation}
+  \mathcal{C} = \begin{bmatrix}
+    0       &  0       & 12{,}389 \\
+    0       & 12{,}389 & -110{,}796 \\
+    10{,}526 & -110{,}796 & 1{,}166\times10^3
+  \end{bmatrix}.
+\end{equation}
+
+Wyznacznik:
+\begin{equation}
+  \det(\mathcal{C}) = 12{,}389 \times (-130{,}380) \approx -1614 \neq 0.
+\end{equation}
+
+Macierz ma pełny rząd~3, zatem układ jest \textbf{w~pełni sterowalny} —
+możliwe jest zaprojektowanie efektywnego regulatora stanu (LQR).
+
+\subsection{Obserwowalność}
+
+Macierz obserwowalności $\mathcal{O} = [C;\;CA;\;CA^2]^T$:
+
+\begin{equation}
+  \mathcal{O} = \begin{bmatrix}
+    1 & 0 & 0 \\
+    0 & 1 & 0 \\
+    0 & 0 & 1{,}177
+  \end{bmatrix}, \quad
+  \det(\mathcal{O}) = 1{,}177 \neq 0.
+\end{equation}
+
+Rząd wynosi~3, układ jest \textbf{w~pełni obserwowalny} — wszystkie stany
+można zrekonstruować z~pomiaru pozycji kulki $x$.
+
+\subsection{Regulator PID}
+
+W~firmware mikrokontrolera zaimplementowano klasyczny regulator PID
+z~następującymi modyfikacjami:
+\begin{itemize}
+  \item \textbf{pochodna na pomiarze} — różniczkowanie sygnału wyjścia
+        (nie uchybu), co eliminuje skok pochodnej przy zmianie wartości zadanej;
+  \item \textbf{anti-windup} (ograniczenie członu całkującego) — zapobiega
+        nasyceniu członu~I przy wysyceniu wyjścia;
+  \item \textbf{dyskretyzacja} — metoda prostokątów (Euler przód)
+        z~krokiem $T_s = 30\,\mathrm{ms}$.
+\end{itemize}
+
+Nastawy regulatora PID ($K_p$, $K_i$, $K_d$) dobierane są iteracyjnie
+i~przesyłane do mikrokontrolera w~czasie rzeczywistym przez aplikację
+desktopową bez konieczności ponownego programowania układu.
+
+\subsection{Regulator LQR}
+
+Regulator LQR (\textit{Linear Quadratic Regulator}) minimalizuje wskaźnik
+jakości kwadratowej:
+\begin{equation}
+  J = \int_0^\infty \left( \mathbf{x}^T Q\,\mathbf{x} + u^T R\,u \right) dt,
+\end{equation}
+gdzie macierze wag $Q$ (penalizacja stanów) i~$R$ (penalizacja wejścia)
+dobrano metodą iteracyjną w~środowisku MATLAB/Simulink.
+Uzyskany wektor wzmocnień $\mathbf{K}$ przeniesiono bezpośrednio do modułu
+\texttt{lqr.c} firmware.
+Sygnał sterujący wyznaczany jest jako:
+\begin{equation}
+  u = -\mathbf{K}\,\mathbf{x} = -[K_1\;K_2\;K_3]\begin{bmatrix} x \\ \dot{x} \\ \theta \end{bmatrix}.
+\end{equation}
+
+% -----------------------------------------------------------------------
 \section{Symulacja układu regulacji}
+% -----------------------------------------------------------------------
+
+Model układu w~przestrzeni stanów~\eqref{eq:statespace} zaimplementowano
+w~środowisku MATLAB/Simulink (plik \texttt{5-matlab/ballonbeam\_matlab1.slx}).
+Model posłużył do wstępnego doboru nastaw regulatorów przed weryfikacją
+eksperymentalną na rzeczywistym stanowisku.
+Szczegółowe wyniki symulacji porównawczych (PID vs.\ LQR) stanowią
+uzupełnienie niniejszej pracy.
